@@ -6,3 +6,5 @@ nacl
 sg
 network flow
 tenancy
+vpc
+route table
