@@ -8,3 +8,5 @@ network flow
 tenancy
 vpc
 route table
+internet gateway
+NAT gateway
