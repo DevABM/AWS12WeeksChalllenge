@@ -1,0 +1,449 @@
+import json
+import fmcapi
+import os
+import requests
+
+fmc_host = os.environ['fmcip']
+fmc_username = 'admin'
+fmc_password = os.environ['password']
+access_list_name = 'GWLB-Inspection-ACL'
+access_policy_name = 'GWLB-Inspection-ACL'
+auth_token = ''
+NLBURL = os.environ['NLBURL']
+
+
+def auth_token_creation():
+    r = None
+    headers = {'Content-Type': 'application/json'}
+    api_auth_path = "/api/fmc_platform/v1/auth/generatetoken"
+    auth_url = 'https://' + fmc_host + api_auth_path
+    try:
+        # Download SSL certificates from your FMC first and provide its path for verification.
+        r = requests.post(auth_url, headers=headers, auth=requests.auth.HTTPBasicAuth(fmc_username,fmc_password), verify=False)
+        auth_headers = r.headers
+        auth_token = auth_headers.get('X-auth-access-token', default=None)
+        if auth_token == None:
+           print("auth_token not found. Exiting...")
+           print(auth_headers)
+           
+    except Exception as err:
+        print ("Error in generating auth token --> "+str(err))
+        
+    headers['X-auth-access-token']=auth_token
+    return auth_token
+    
+def get_devices(auth_token):
+    url = f'https://{fmc_host}/api/fmc_config/v1/domain/default/devices/devicerecords'
+    httpsheaders = { 'Content-Type': 'application/json', 'x-auth-access-token': auth_token }
+    response = requests.get(url, headers=httpsheaders, verify=False)
+    if response.status_code == 200:
+        devices = response.json().get('items', [])
+        print(devices)
+        return devices
+    else:
+        print(f"Failed to retrieve devices. Status code: {response.status_code}, Error: {response.text}")
+        return []
+        
+
+def get_device_interfaces(device_id,auth_token):
+    url = f'https://{fmc_host}/api/fmc_config/v1/domain/default/devices/devicerecords/{device_id}/physicalinterfaces'
+    httpsheaders = { 'Content-Type': 'application/json', 'x-auth-access-token': auth_token }
+    response = requests.get(url, headers=httpsheaders, verify=False)
+    if response.status_code == 200:
+        interfaces = response.json().get('items', [])
+        # Find the interface ID for 'TenGigabitEthernet0/1'
+        interface_id = None
+        print(interfaces)
+        for interface in interfaces:
+            if interface.get('name') == 'TenGigabitEthernet0/1':
+                interface_id = interface.get('id')
+                print(interface_id)
+                return interface_id
+                break
+
+    else:
+        print(f"Failed to retrieve interfaces. Status code: {response.status_code}, Error: {response.text}")
+        return []
+    
+
+def configure_vtep(interface_id, device_name, device_id, auth_token):
+
+    try:
+        
+        # Configure VTEP settings
+        vtep_payload = {
+            "nveEnable": True,
+            "vtepEntries": [
+                {
+                    "sourceInterface": {
+                        "name": "GigabitEthernet0/0",
+                        "type": "PhysicalInterface",
+                        "id": interface_id
+                    },
+                    "nveVtepId": 1,
+                    "nveDestinationPort": 6081,
+                    "nveEncapsulationType": "GENEVE"
+                }
+            ],
+            "type": "VTEPPolicy"
+        }
+        
+        url = f'https://{fmc_host}/api/fmc_config/v1/domain/default/devices/devicerecords/{device_id}/vteppolicies'
+        httpsheaders = { 'Content-Type': 'application/json', 'x-auth-access-token': auth_token }
+        response = requests.put(url, headers=httpsheaders, json=vtep_payload, verify=False)
+        
+        
+        
+        if response.status_code == 201:
+            print(f"VTEP configuration completed for device '{device_name}'.")
+            
+            # Enable VNI interface
+            vni_payload = {
+                "type": "VNIInterface",
+                "enabled": True,
+                "enableAntiSpoofing": True,
+                "ifname": "VNI_Geneve",
+                "vniId": 1,
+                "vtepID": 1,
+                "enableProxy": True,
+            }
+                
+            interface_url = f'https://{fmc_host}/api/fmc_config/v1/domain/default/devices/devicerecords/{device_id}/vniinterfaces'
+            response = requests.post(interface_url, headers=httpsheaders, json=vni_payload, verify=False)
+                
+            if response.status_code == 201:
+                print(f"VNI interface enabled for device '{device_name}'.")
+            else:
+                print(f"Failed to enable VNI interface for device '{device_name}'. Status code: {response.status_code}, Error: {response.text}")
+                                
+        else:
+            print(f"Failed to configure VTEP for device '{device_name}'. Status code: {response.status_code}, Error: {response.text}")
+    
+    except Exception as err:
+        print(f"Error occurred during VTEP configuration for device '{device_name}': {str(err)}")
+
+
+
+
+
+def lambda_handler(event, context):
+    # Retrieve necessary information from the event
+    fmc_host = os.environ['fmcip']
+    fmc_username = 'admin'
+    fmc_password = os.environ['password']
+    access_list_name = 'GWLB-Inspection-ACL'
+    access_policy_name = 'GWLB-Inspection-ACL'
+    
+
+    try:
+        # Create an instance of the FMC API client
+        with fmcapi.FMC(host=fmc_host, username=fmc_username, password=fmc_password) as fmc:
+            
+
+            # Create a new Access Control Policy
+            access_policy = fmcapi.AccessPolicies(fmc=fmc, name=access_policy_name)
+            access_policy.post()
+            
+            # Create the "TG-healthcheck-port" port object
+            port = fmcapi.ProtocolPortObjects(fmc=fmc, name="TG-healthcheck-port", port="8080", protocol="TCP")
+            port.post()
+            
+
+           
+            # Inside Gateway1 Host Object to be used with static rout eto direct traffic to exit to metaserver
+            inside_gateway1 = fmcapi.Hosts(fmc=fmc, name="inside-gateway1", value="10.0.8.1")
+            inside_gateway1.post()
+
+            # Inside Gateway2 Host Object to be used with static rout eto direct traffic to exit to metaserver
+            inside_gateway2 = fmcapi.Hosts(fmc=fmc, name="inside-gateway2", value="10.0.9.1")
+            inside_gateway2.post()
+            
+            # Outside Gateway1 Host Object to be used with static route for returning traffic to Healthcheck
+            outside_gateway1 = fmcapi.Hosts(fmc=fmc, name="SecurityVPC-Data1-GW", value="10.0.4.1")
+            outside_gateway1.post()
+            
+            # Outside Gateway2 Host Object to be used with static route for returning traffic to Healthcheck
+            outside_gateway2 = fmcapi.Hosts(fmc=fmc, name="SecurityVPC-Data2-GW", value="10.0.5.1")
+            outside_gateway2.post()
+
+            # Adding GoogleDNS to Allow ICMP
+            ICMP_HOST = fmcapi.Hosts(fmc=fmc, name="GoogleDNS", value="8.8.4.4")
+            ICMP_HOST.post()
+       
+            
+            # Create network objects
+            network1 = fmcapi.Networks(fmc=fmc, name="SecurityVPC-Data1", value="10.0.4.0/24")
+            network1.post()
+
+            network3 = fmcapi.Networks(fmc=fmc, name="SecurityVPC-Data2", value="10.0.5.0/24")
+            network3.post()
+
+            network5 = fmcapi.Hosts(fmc=fmc, name="aws-metadata-server", value="169.254.169.254")
+            network5.post()
+            
+            
+            # Create inside network objects
+            network4 = fmcapi.Networks(fmc=fmc, name="SecurityVPC-Inside-AZ1", value="10.0.8.0/24")
+            network4.post()
+            network5 = fmcapi.Networks(fmc=fmc, name="SecurityVPC-Inside-AZ2", value="10.0.9.0/24")
+            network5.post()
+            
+            # Create a new URL object for NLB Server
+            url_object = fmcapi.URLs(fmc=fmc)
+            url_object.name = "NLB-SERVER"
+            url_object.url = NLBURL.replace("http://", "")
+            url_object.post()  # Create the URL object in the FMC
+            
+            # Adding www.google.com to Allow HTTP\HTTPS testing
+            url_object = fmcapi.URLs(fmc=fmc)
+            url_object.name = "google"
+            url_object.url = "www.google.com"
+            url_object.post()  # Create the URL object in the FMC
+            
+            #HealthCheck NAT Policy
+            nat1 = fmcapi.FTDNatPolicies(fmc=fmc, name="Healthcheck_Nat")
+            nat1.type = "Threat Defense NAT"
+            nat1.post()
+            
+
+            
+            #Add FTD device to FMC and assign to the specified access policy
+            ftd1 = fmcapi.DeviceRecords(fmc=fmc)
+            ftd1.hostName = "10.0.6.60"
+            ftd1.regKey = "Cisco-123"
+            ftd1.acp(name="GWLB-Inspection-ACL")
+            ftd1.name = "FTD01"
+            ftd1.type = "Device"
+            #ftd1.licensing(action="add", name="BASE")
+            ftd1.post(post_wait_time=60)
+            
+
+            #Register Device 2
+            ftd2 = fmcapi.DeviceRecords(fmc=fmc)
+            ftd2.hostName = "10.0.7.60"
+            ftd2.regKey = "Cisco-123"
+            ftd2.acp(name="GWLB-Inspection-ACL")
+            ftd2.name = "FTD02"
+            ftd2.type = "Device"
+            #ftd2.licensing(action="add", name="BASE")
+            ftd2.post(post_wait_time=400)
+            
+            
+
+            # Create security zones
+            inside_zone = fmcapi.SecurityZones(fmc=fmc, name="inside")
+            inside_zone.post()
+            outside_zone = fmcapi.SecurityZones(fmc=fmc, name="outside")
+            outside_zone.post()
+            
+            # Enable eth0 interface for FTD01
+            device1 = fmcapi.DeviceRecords(fmc=fmc)
+            device1.get(name="FTD01")
+            ftd1_g00 = fmcapi.PhysicalInterfaces(fmc=fmc, device_name=device1.name, ipv4={"static": {"address": "10.0.8.60", "netmask": "255.255.255.0"}})
+            ftd1_g00.get(name="TenGigabitEthernet0/0")
+            ftd1_g00.enabled = True
+            ftd1_g00.ifname = "inside"
+            ftd1_g00.sz(name="inside")
+            ftd1_g00.put()
+            
+            Sleep = 20
+
+            # Enable eth1 interface for FTD01
+            ftd1_g01 = fmcapi.PhysicalInterfaces(fmc=fmc, device_name=device1.name, ipv4={"static": {"address": "10.0.4.60", "netmask": "255.255.255.0"}})
+            ftd1_g01.get(name="TenGigabitEthernet0/1")
+            ftd1_g01.enabled = True
+            ftd1_g01.ifname = "outside"
+            ftd1_g01.sz(name="outside")
+            ftd1_g01.put()
+            
+            Sleep = 20
+
+            # Enable eth0 interface for FTD02
+            device2 = fmcapi.DeviceRecords(fmc=fmc)
+            device2.get(name="FTD02")
+            ftd2_g00 = fmcapi.PhysicalInterfaces(fmc=fmc, device_name=device2.name, ipv4={"static": {"address": "10.0.9.60", "netmask": "255.255.255.0"}})
+            ftd2_g00.get(name="TenGigabitEthernet0/0")
+            ftd2_g00.enabled = True
+            ftd2_g00.ifname = "inside"
+            ftd2_g00.sz(name="inside")
+            ftd2_g00.put()
+            
+            Sleep = 20
+    
+            # Enable eth1 interface for FTD02
+            ftd2_g01 = fmcapi.PhysicalInterfaces(fmc=fmc, device_name=device2.name, ipv4={"static": {"address": "10.0.5.60", "netmask": "255.255.255.0"}})
+            ftd2_g01.get(name="TenGigabitEthernet0/1")
+            ftd2_g01.enabled = True
+            ftd2_g01.ifname = "outside"
+            ftd2_g01.sz(name="outside")
+            ftd2_g01.put()
+            
+            Sleep = 20
+            
+            # Create an instance of the PolicyAssignments class
+            policy_assignments = fmcapi.PolicyAssignments(fmc=fmc)
+
+            # Specify the name of the NAT policy to assign
+            nat_policy_name = "Healthcheck_Nat"
+            
+            # Get the NAT policy by name
+            nat_policy = fmcapi.FTDNatPolicies(fmc=fmc,name=nat_policy_name)
+            nat_policy.get()
+
+            # Configure VTEP & VNI for GENEVE Tunnel for each FTD01 & FTD02
+            auth_token = auth_token_creation()
+            print(auth_token)
+
+
+            devices = get_devices(auth_token)
+            if devices:
+                print("Devices:")
+                for device in devices:
+                    device_id = device.get('id')
+                    name = device.get('name')
+                    interface_id = get_device_interfaces(device_id, auth_token)
+                    configure_vtep(interface_id, name, device_id, auth_token)
+                    print(device_id)
+
+            else:
+                print("No devices found to configure VTEP")
+
+            # Specify the devices to assign the NAT policy to
+            devices = [
+                {"type": "device", "name": "FTD01"},
+                {"type": "device", "name": "FTD02"}
+            ]
+
+            # Assign the NAT policy to the devices using the PolicyAssignments class
+            policy_assignments.ftd_natpolicy(name=nat_policy.name, devices=devices)
+
+            # Post the policy assignments
+            policy_assignments.post()
+
+
+            # Create network object group - will be used for ACL rules specific to GWLB Healthchecks
+            network_group = fmcapi.NetworkGroups(fmc=fmc, name="Inspection-Outside-Subnets")
+            network_group.named_networks(action="add", name="SecurityVPC-Data1")
+            network_group.named_networks(action="add", name="SecurityVPC-Data2")
+            network_group.post()
+
+
+            # Create static routes to inside gateways for healthchecks
+            static_route1 = fmcapi.IPv4StaticRoutes(fmc=fmc, name="Static-Route-FTD01", type="ROUTE")
+            static_route1.device(device_name="FTD01")
+            static_route1.interfaceName = "inside"
+            static_route1.networks(action="add", networks=["aws-metadata-server"])
+            static_route1.gw(name=inside_gateway1.name)
+            static_route1.post()
+
+            static_route2 = fmcapi.IPv4StaticRoutes(fmc=fmc, name="Static-Route-FTD02", type="ROUTE")
+            static_route2.device(device_name="FTD02")
+            static_route2.interfaceName = "inside"
+            static_route2.networks(action="add", networks=["aws-metadata-server"])
+            static_route2.gw(name=inside_gateway2.name)
+            static_route2.post()
+            
+            # Create static routes to outside gateways for healthchecks cross-AZ
+            static_route3 = fmcapi.IPv4StaticRoutes(fmc=fmc, name="Static-CrossAZ-FTD01", type="ROUTE")
+            static_route3.device(device_name="FTD01")
+            static_route3.interfaceName = "outside"
+            static_route3.networks(action="add", networks=["SecurityVPC-Data2"])
+            static_route3.gw(name=outside_gateway1.name)
+            static_route3.post()
+
+            static_route4 = fmcapi.IPv4StaticRoutes(fmc=fmc, name="Static-CrossAZ-FTD02", type="ROUTE")
+            static_route4.device(device_name="FTD02")
+            static_route4.interfaceName = "outside"
+            static_route4.networks(action="add", networks=["SecurityVPC-Data1"])
+            static_route4.gw(name=outside_gateway2.name)
+            static_route4.post()
+            
+            # Create a new Access Control Rule to allow HTTP traffic to Webserver NLB
+            
+            access_rule = fmcapi.AccessRules(fmc=fmc, acp_name=access_policy.name, name=access_list_name,action="BLOCK_RESET_INTERACTIVE",enabled=True)
+            access_rule.enabled = True
+            access_rule.source_network(action="add", name="any-ipv4")
+            access_rule.destination_port(action="add", name="HTTP")
+            access_rule.urls_info(action="add", name="NLB-SERVER")
+            access_rule.sendEventsToFMC = True
+            access_rule.logBegin = True
+            access_rule.logEnd = True
+            access_rule.post()
+            
+            # Create a new Access Control Rule to allow Healtchecks
+            access_rule = fmcapi.AccessRules(fmc=fmc, acp_name=access_policy.name, name="Healthchecks",action="ALLOW",enabled=True)
+            access_rule.enabled = True
+            access_rule.source_network(action="add", name="any-ipv4")
+            access_rule.destination_network(action="add",name="aws-metadata-server")
+            access_rule.sendEventsToFMC = True
+            access_rule.logBegin = True
+            access_rule.logEnd = True
+            access_rule.post()
+
+
+            
+            # Create a new Access Control Rule to allow ICMP to 8.8.4.4
+            access_rule = fmcapi.AccessRules(fmc=fmc, acp_name=access_policy.name, name="ICMP_to_Google",action="ALLOW",enabled=True)
+            access_rule.enabled = True
+            access_rule.source_network(action="add", name="any-ipv4")
+            access_rule.destination_network(action="add",name="GoogleDNS")
+            access_rule.application(action="add", name="ICMP")
+            access_rule.sendEventsToFMC = True
+            access_rule.logBegin = True
+            access_rule.logEnd = True
+            access_rule.post()
+
+            # Create a new Access Control Rule to allow ICMP locally
+            access_rule = fmcapi.AccessRules(fmc=fmc, acp_name=access_policy.name, name="ICMP-Local",action="ALLOW",enabled=True)
+            access_rule.enabled = True
+            access_rule.source_network(action="add", name="IPv4-Private-10.0.0.0-8")
+            access_rule.destination_network(action="add",name="IPv4-Private-10.0.0.0-8")
+            access_rule.application(action="add", name="ICMP")
+            access_rule.sendEventsToFMC = True
+            access_rule.logBegin = True
+            access_rule.logEnd = True
+            access_rule.post()
+            
+            # Create a new Access Control Rule to allow HTTP-HTTPS traffic to Google.com
+            
+            access_rule = fmcapi.AccessRules(fmc=fmc, acp_name=access_policy.name, name="HTTP-HTTPS" ,action="ALLOW",enabled=True)
+            access_rule.enabled = True
+            access_rule.source_network(action="add", name="any-ipv4")
+            access_rule.destination_port(action="add", name="HTTP")
+            access_rule.destination_port(action="add", name="HTTPS")
+            access_rule.urls_info(action="add", name="google")
+            access_rule.sendEventsToFMC = True
+            access_rule.logBegin = True
+            access_rule.logEnd = True
+            access_rule.post()
+            
+
+
+            #Translation rule for FTD01 & FTD02 to Allow Healtchecks
+            manualnat1 = fmcapi.ManualNatRules(fmc=fmc)
+            manualnat1.natType = "STATIC"
+            manualnat1.original_source("Inspection-Outside-Subnets")
+            manualnat1.original_destination_port("TG-healthcheck-port")
+            manualnat1.translated_destination_port("HTTP")
+            manualnat1.translated_destination("aws-metadata-server")
+            manualnat1.interfaceInOriginalDestination = True
+            manualnat1.interfaceInTranslatedSource = True
+            manualnat1.source_intf("outside")
+            manualnat1.destination_intf("inside")
+            manualnat1.nat_policy(name=nat1.name)
+            manualnat1.enabled = True
+            manualnat1.post()
+
+
+
+
+            return {
+                'statusCode': 200,
+                'body': json.dumps('Configurations added successfully to FMC01.')
+            }
+
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'body': json.dumps(f'Error: {str(e)}')
+        }

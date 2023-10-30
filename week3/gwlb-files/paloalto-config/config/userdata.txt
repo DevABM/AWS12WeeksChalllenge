@@ -1,0 +1,1 @@
+vmseries-bootstrap-aws-s3bucket=janhaus-gwlblab-deployment-bucket/paloalto-config

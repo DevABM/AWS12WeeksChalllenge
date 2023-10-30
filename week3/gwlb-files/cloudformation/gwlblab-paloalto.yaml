@@ -1,0 +1,318 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  Palo Alto Deployment Template with reference to BootStrap script. 
+
+# ======================================================================================================================
+#   Mappings
+# ======================================================================================================================
+
+Mappings:
+  RegionMap: # Palo Alto 10.2.3
+    "us-east-1": # North Virginia
+      PaloAltoAMI: "ami-05dc03bf3caae5344"
+    "us-east-2": # Ohio
+      PaloAltoAMI: "ami-08458c1734ab24e9f"
+    "us-west-1": # N. California
+      PaloAltoAMI: "ami-0e0f20d183d46d0d2"
+    "us-west-2": # Oregon
+      PaloAltoAMI: "ami-06418cdca025f4c0b"
+    "ap-south-1": # Mumbai
+      PaloAltoAMI: "ami-0f35533718ff79db4"
+    "ap-northeast-3": # Osaka
+      PaloAltoAMI: "ami-068363be6163a65b2"
+    "ap-northeast-2": # Seoul
+      PaloAltoAMI: "ami-0d82592cb771a70cd"
+    "ap-northeast-1": # Tokyo
+      PaloAltoAMI: "ami-0063037f21a2cc218"
+    "ap-southeast-1": # Singapore
+      PaloAltoAMI: "ami-01e04833d054f8757"
+    "ap-southeast-2": # Sydney
+      PaloAltoAMI: "ami-022d5fb5434a68bdc"
+    "eu-west-3": # Paris
+      PaloAltoAMI: "ami-02ce2e6c08b38a0d6"
+    "eu-west-2": # London
+      PaloAltoAMI: "ami-0d6f21b4fcfd0666b"
+    "eu-west-1": # Ireland
+      PaloAltoAMI: "ami-012d75c7d5cd370af"
+    "sa-east-1": # Sao Paulo
+      PaloAltoAMI: "ami-0bba5d416640189d8"
+    "ca-central-1": # Canada Central
+      PaloAltoAMI: "ami-0d414b4a3173633b7"
+    "eu-central-1": # Frankfurt
+      PaloAltoAMI: "ami-00ea5378bc5668b60"
+    
+
+# ======================================================================================================================
+#   Parameters
+# ======================================================================================================================
+
+Parameters:
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   Passed Pramaters from Main Stack
+# ----------------------------------------------------------------------------------------------------------------------
+
+  #Desired Stack Name
+  GlobalStackName:
+    Description: Stackname that you would like to uniquely identify your resources.
+    Type: String
+
+  #Security VPC Parameters
+  SecurityVPC: 
+    Type: AWS::EC2::VPC::Id
+    Description: 'The VPC ID'
+  SecurityVPCCIDR:
+    Type: String
+    Description: Provide a/16 CIDR space.
+  SecurityVPCVMSeriesDataSubnetAZ1: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+  SecurityVPCVMSeriesDataSubnetAZ2: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+  SecurityVPCNATGWSubnetAZ1: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+  SecurityVPCNATGWSubnetAZ2: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+  SecurityVPCVMSeriesManagementSecurityGroup: 
+    Type: String
+    Description: 'Security Group for Management interfaces on VMSeries Instances'
+  SecurityVPCVMSeriesDataSecurityGroup: 
+    Type: String
+    Description: 'Security Group for Data Interfaces on VMSeries Instances'
+
+  VMSeriesInstanceProfile: 
+    Type: String
+    Description: 'Instance Profile for VPCs'
+
+
+  #Management Network CIDR
+  RemoteManagementCIDR:
+    Description: >-
+      Remote Management CIDR to be allowed management access to VM-Series Firewall (e.g. 192.168.0.0/25)
+    Type: String
+
+  #EC2 key pair for the deployment
+  EC2KeyPair:
+    Description: >-
+      AWS EC2 Instance Key Pair for authentication to the VM-Series Firewalls.
+    Type: AWS::EC2::KeyPair::KeyName
+
+  #Palo Alto Instance Parameters
+  PaloAltoInstanceType: 
+    Description: 'PaloAlto Instance Type'
+    Type: String
+  PaloAltoAMI: 
+    Description: 'PaloAlto AMI'
+    Type: String
+    
+  GWLBLabS3BootstrapBucket:
+    Description: 'Bucket used for GWLB Bootstrapping'
+    Type: String
+
+
+# ======================================================================================================================
+#   Resources
+# ======================================================================================================================
+
+Resources: 
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   First PaloAlto Instance - AZ1
+# ----------------------------------------------------------------------------------------------------------------------
+
+  PaloAltoManagementENIAZ1:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: PaloAlto-Management-01-AZ1
+      GroupSet: [ !Ref SecurityVPCVMSeriesManagementSecurityGroup ]
+      SubnetId: !Ref SecurityVPCNATGWSubnetAZ1
+      PrivateIpAddress: "10.0.6.60"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'PaloAlto-Management-01-AZ1'] ]
+
+  PaloAltoManagementEIPAZ1:
+    Type: AWS::EC2::EIP
+    #DependsOn: SecurityIGWAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'PaloAlto-Management-01-AZ1'] ]
+
+  PaloAltoManagementEIPAssociationAZ1:
+    Type: AWS::EC2::EIPAssociation
+    DependsOn: PaloAltoManagementEIPAZ1
+    Properties:
+      AllocationId: !GetAtt PaloAltoManagementEIPAZ1.AllocationId
+      NetworkInterfaceId: !Ref PaloAltoManagementENIAZ1
+
+  PaloAltoDataENIAZ1:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: PaloAlto-Data-01-AZ1
+      SourceDestCheck: No
+      GroupSet: [ !Ref SecurityVPCVMSeriesDataSecurityGroup ]
+      SubnetId: !Ref SecurityVPCVMSeriesDataSubnetAZ1
+      PrivateIpAddress: "10.0.4.60"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'PaloAlto-Data-01-AZ1'] ]
+
+  PaloAltoInstanceAZ1:
+    Type: AWS::EC2::Instance
+    DependsOn: 
+      - PaloAltoManagementEIPAZ1
+      - PaloAltoDataENIAZ1
+      - PaloAltoManagementEIPAssociationAZ1
+    Properties:
+      DisableApiTermination: false
+      InstanceInitiatedShutdownBehavior: stop
+      EbsOptimized: true
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", PaloAltoAMI]
+      InstanceType: !Ref PaloAltoInstanceType
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: gp2
+            DeleteOnTermination: true
+            VolumeSize: 30
+        - DeviceName: /dev/sdb
+          Ebs:
+            VolumeType: gp2
+            DeleteOnTermination: true
+            VolumeSize: 30
+      KeyName: !Ref EC2KeyPair
+      Monitoring: false
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'PaloAlto-01-AZ1'] ]
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref PaloAltoDataENIAZ1
+          DeviceIndex: '0'
+        - NetworkInterfaceId: !Ref PaloAltoManagementENIAZ1
+          DeviceIndex: '1'
+      IamInstanceProfile: !Ref VMSeriesInstanceProfile
+      UserData:
+        Fn::Base64: !Sub |
+          vmseries-bootstrap-aws-s3bucket=${GWLBLabS3BootstrapBucket}/paloalto-config
+
+            
+# ----------------------------------------------------------------------------------------------------------------------
+#   Second PaloAlto Instance - AZ2
+# ----------------------------------------------------------------------------------------------------------------------
+
+  PaloAltoManagementENIAZ2:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: PaloAlto-Management-01-AZ2
+      GroupSet: [ !Ref SecurityVPCVMSeriesManagementSecurityGroup ]
+      SubnetId: !Ref SecurityVPCNATGWSubnetAZ2
+      PrivateIpAddress: "10.0.7.60"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'PaloAlto-Management-02-AZ2'] ]
+
+  PaloAltoManagementEIPAZ2:
+    Type: AWS::EC2::EIP
+    #DependsOn: SecurityIGWAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'PaloAlto-Management-02-AZ2'] ]
+
+  PaloAltoManagementEIPAssociationAZ2:
+    Type: AWS::EC2::EIPAssociation
+    DependsOn: PaloAltoManagementEIPAZ2
+    Properties:
+      AllocationId: !GetAtt PaloAltoManagementEIPAZ2.AllocationId
+      NetworkInterfaceId: !Ref PaloAltoManagementENIAZ2
+
+  PaloAltoDataENIAZ2:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: PaloAlto-Data-02-AZ2
+      SourceDestCheck: No
+      GroupSet: [ !Ref SecurityVPCVMSeriesDataSecurityGroup ]
+      SubnetId: !Ref SecurityVPCVMSeriesDataSubnetAZ2
+      PrivateIpAddress: "10.0.5.60"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'PaloAlto-Data-02-AZ2'] ]
+
+  PaloAltoInstanceAZ2:
+    Type: AWS::EC2::Instance
+    DependsOn: 
+      - PaloAltoManagementEIPAZ2
+      - PaloAltoDataENIAZ2
+      - PaloAltoManagementEIPAssociationAZ2
+    Properties:
+      DisableApiTermination: false
+      InstanceInitiatedShutdownBehavior: stop
+      EbsOptimized: true
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", PaloAltoAMI] 
+      InstanceType: !Ref PaloAltoInstanceType
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: gp2
+            DeleteOnTermination: true
+            VolumeSize: 30
+        - DeviceName: /dev/sdb
+          Ebs:
+            VolumeType: gp2
+            DeleteOnTermination: true
+            VolumeSize: 30
+      KeyName: !Ref EC2KeyPair
+      Monitoring: false
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'PaloAlto-02-AZ2'] ]
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref PaloAltoDataENIAZ2
+          DeviceIndex: '0'
+        - NetworkInterfaceId: !Ref PaloAltoManagementENIAZ2
+          DeviceIndex: '1'
+      IamInstanceProfile: !Ref VMSeriesInstanceProfile
+      UserData: 
+        Fn::Base64: !Sub |
+            vmseries-bootstrap-aws-s3bucket=${GWLBLabS3BootstrapBucket}/paloalto-config
+
+
+# ======================================================================================================================
+#   Outputs
+# ======================================================================================================================
+
+Outputs:
+
+  PaloAlto01AZ1:
+    Description: "Connect first into PaloAlto Instance"
+    Value: !Sub |
+      ssh -i ${EC2KeyPair} admin@${PaloAltoManagementEIPAZ1}
+    Export: 
+      Name: !Sub ${GlobalStackName}-PaloAlto-01-AZ1
+
+  PaloAlto02AZ2: 
+    Description: "Connect into second PaloAlto Instance"
+    Value: !Sub | 
+      ssh -i ${EC2KeyPair} admin@${PaloAltoManagementEIPAZ2}
+    Export: 
+      Name: !Sub ${GlobalStackName}-PaloAlto-02-AZ2
+  
+  PaloAltoInstanceAZ1: 
+    Description: "Instance ID for PaloAlto-01-AZ1"
+    Value: !Ref PaloAltoInstanceAZ1
+    Export: 
+      Name: !Sub ${GlobalStackName}-PaloAlto-01-AZ1-InstanceId
+
+  PaloAltoInstanceAZ2: 
+    Description: "Instance ID for PaloAlto-02-AZ2"
+    Value: !Ref PaloAltoInstanceAZ2
+    Export: 
+      Name: !Sub ${GlobalStackName}-PaloAlto-02-AZ2-InstanceId
+  

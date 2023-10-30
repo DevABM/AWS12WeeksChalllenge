@@ -1,0 +1,2061 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  Security VPC Deployment: VM-Series Deployment with AWS Gateway Load Balancer (GWLB)
+
+# ======================================================================================================================
+#   Parameters
+# ======================================================================================================================
+
+Parameters:
+# For TGW
+  RegionalASN:
+    Type: String
+    Description: Provide BGP ASN for TGW. (no need to change unless you are extending this lab)
+    Default: 65000
+
+# For Apps
+  VPC1CIDR:
+    Type: String
+    Description: Provide a/16 CIDR space.
+    Default: 10.1.0.0/16
+    AllowedValues:
+      - "10.0.0.0/16"
+      - "10.1.0.0/16"
+      - "10.2.0.0/16"
+      - "10.3.0.0/16"
+      - "10.4.0.0/16"
+      - "10.64.0.0/16"
+      - "10.65.0.0/16"
+      - "10.66.0.0/16"
+      - "10.67.0.0/16"
+  VPC2CIDR:
+    Type: String
+    Description: Provide a/16 CIDR space.
+    Default: 10.2.0.0/16
+    AllowedValues:
+      - "10.0.0.0/16"
+      - "10.1.0.0/16"
+      - "10.2.0.0/16"
+      - "10.3.0.0/16"
+      - "10.4.0.0/16"
+      - "10.64.0.0/16"
+      - "10.65.0.0/16"
+      - "10.66.0.0/16"
+      - "10.67.0.0/16"
+  SecurityVPCCIDR:
+    Type: String
+    Description: Provide a/16 CIDR space.
+    Default: 10.0.0.0/16
+    AllowedValues:
+      - "10.0.0.0/16"
+      - "10.1.0.0/16"
+      - "10.2.0.0/16"
+      - "10.3.0.0/16"
+      - "10.4.0.0/16"
+      - "10.64.0.0/16"
+      - "10.65.0.0/16"
+      - "10.66.0.0/16"
+      - "10.67.0.0/16"
+
+# Management Network CIDR
+
+  RemoteManagementCIDR:
+    Description: >-
+      Remote Management CIDR to be allowed management access to VM-Series Firewall (e.g. 192.168.0.0/25)
+    Type: String
+    Default: 0.0.0.0/0
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})
+    ConstraintDescription: Must be a valid CIDR (e.g. 0.0.0.0/0)
+
+# VM-Series Instance
+
+  VMSeriesInstanceType:
+    Description: >-
+      More information follow this link: https://docs.paloaltonetworks.com/vm-series/10-0/vm-series-performance-capacity/vm-series-performance-capacity/vm-series-on-aws-models-and-instances.html
+    Type: String
+    AllowedValues:
+      - m3.xlarge
+      - m3.2xlarge
+      - m4.xlarge
+      - m4.2xlarge
+      - m4.4xlarge
+      - m5.large
+      - m5.xlarge
+      - m5.2xlarge
+      - m5.4xlarge
+      - m5.12xlarge
+      - m5.24xlarge
+      - m5n.large
+      - m5n.xlarge
+      - m5n.2xlarge
+      - m5n.4xlarge
+      - m5n.8xlarge
+      - c3.xlarge
+      - c3.2xlarge
+      - c3.4xlarge
+      - c3.8xlarge
+      - c4.xlarge
+      - c4.2xlarge
+      - c4.4xlarge
+      - c4.8xlarge
+      - c5.xlarge
+      - c5.2xlarge
+      - c5.4xlarge
+      - c5.9xlarge
+      - c5.18xlarge
+      - c5n.xlarge
+      - c5n.2xlarge
+      - c5n.4xlarge
+      - c5n.9xlarge
+      - c5n.18xlarge
+    Default: m5.xlarge
+
+  VMSeriesAMI:
+    Description: >-
+      AMI reference in the format 'ami-00000000000' for PAN-OS v10.0.2 or above.
+    Type: String
+    Default: ami-0f8c3e2c1b7b4bcc9
+    AllowedPattern: ami-\w{1,30}
+    ConstraintDescription: Must be a valid AMI (e.g. ami-0a00a3780ec15f108)
+
+  EC2KeyPair:
+    Description: >-
+      AWS EC2 Instance Key Pair for authentication to the VM-Series Firewalls.
+    Type: AWS::EC2::KeyPair::KeyName
+    AllowedPattern: .+
+    ConstraintDescription: Must set an EC2 Key Pair for VM-Series
+
+  VmseriesBootstrapS3BucketName:
+    Description: >-
+      Enter a AWS S3 Bucket containing the VM-Series Bootstrap files and folders or leave blank if you chose not to configure the firewalls with Bootstrap. For more information follow this link: https://docs.paloaltonetworks.com/vm-series/10-0/vm-series-deployment/bootstrap-the-vm-series-firewall.html
+    Type: String
+    Default: seib-paloalto-west2
+    AllowedPattern: ^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$|^$
+    ConstraintDescription: Must be a valid S3 Bucket name or left blank for no Bootstrap.
+
+# ======================================================================================================================
+#   Metadata
+# ======================================================================================================================
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: "Required Changes"
+        Parameters:
+          - EC2KeyPair
+          - VmseriesBootstrapS3BucketName
+          - RemoteManagementCIDR
+      
+      -
+        Label:
+          default: "VPC CIDRs"
+        Parameters:
+          - SecurityVPCCIDR
+          - VPC1CIDR
+          - VPC2CIDR
+
+      -
+        Label:
+          default: "VM-Series Deployment"
+        Parameters:
+          - VMSeriesAMI
+          - VMSeriesInstanceType
+
+
+    ParameterLabels:
+      VmseriesBootstrapS3BucketName:
+        default: "AWS S3 Bucket Name containing the VM-Series Bootstrap Information:"
+      VMSeriesAMI:
+        default: "AMI ID of VM-Series"
+      VMSeriesInstanceType:
+        default: "EC2 Instance Type for VM-Series"
+      EC2KeyPair:
+        default: "EC2 Keypair for Authentication to EC2 Instances"
+      RemoteManagementCIDR:
+        default: "IP CIDR for Allowed Remote Management of the VM-Series"
+
+# ======================================================================================================================
+#   Conditions
+# ======================================================================================================================
+
+Conditions:
+  BootstrapVmseries: !Not [!Equals [!Ref VmseriesBootstrapS3BucketName, ""]]
+
+# ======================================================================================================================
+#   Resources
+# ======================================================================================================================
+
+
+Mappings:
+  RegionMap:
+    "eu-north-1":
+      AMI: "ami-3f36be41"
+    "ap-south-1":
+      AMI: "ami-0d2692b6acea72ee6"
+    "eu-west-3":
+      AMI: "ami-0adcddd3324248c4c"
+    "eu-west-2":
+      AMI: "ami-0d8e27447ec2c8410"
+    "eu-west-1":
+      AMI: "ami-0bbc25e23a7640b9b"
+    "ap-northeast-3":
+      AMI: "ami-0ee933a7f81beb045"
+    "ap-northeast-2":
+      AMI: "ami-095ca789e0549777d"
+    "ap-northeast-1":
+      AMI: "ami-0c3fd0f5d33134a76"
+    "sa-east-1":
+      AMI: "ami-058943e7d9b9cabfb"
+    "ca-central-1":
+      AMI: "ami-0d4ae09ec9361d8ac"
+    "ap-southeast-1":
+      AMI: "ami-01f7527546b557442"
+    "ap-southeast-2":
+      AMI: "ami-0dc96254d5535925f"
+    "eu-central-1":
+      AMI: "ami-0cc293023f983ed53"
+    "us-east-1":
+      AMI: "ami-0b898040803850657"
+    "us-east-2":
+      AMI: "ami-0d8f6eb4f641ef691"
+    "us-west-1":
+      AMI: "ami-056ee704806822732"
+    "us-west-2":
+      AMI: "ami-082b5a644766e0e6f"
+
+Resources:
+
+  # Transit Gateway
+  TransitGateway:
+    Type: "AWS::EC2::TransitGateway"
+    Properties:
+      AmazonSideAsn: !Ref "RegionalASN"
+      AutoAcceptSharedAttachments: "enable"
+      DefaultRouteTableAssociation: "disable"
+      DefaultRouteTablePropagation: "disable"
+      DnsSupport: "enable"
+      VpnEcmpSupport: "enable"
+      Tags:
+        - Key: "Name"
+          Value: !Sub "${AWS::StackName}-TGW"
+
+  AppsVPCsRouteTable:
+    Type: "AWS::EC2::TransitGatewayRouteTable"
+    Properties:
+      TransitGatewayId: !Ref TransitGateway
+      Tags:
+        - Key: "Name"
+          Value: !Sub "${AWS::StackName}-Apps"
+
+  SecurityVPCsRouteTable:
+    Type: "AWS::EC2::TransitGatewayRouteTable"
+    Properties:
+      TransitGatewayId: !Ref TransitGateway
+      Tags:
+        - Key: "Name"
+          Value: !Sub "${AWS::StackName}-Security"
+
+  VPC1Attachment:
+    Type: "AWS::EC2::TransitGatewayAttachment"
+    Properties:
+      VpcId: !Ref VPC1
+      TransitGatewayId: !Ref TransitGateway
+      SubnetIds:
+        - !Ref VPC1PrivateSubnetA
+        - !Ref VPC1PrivateSubnetB
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC1"
+
+  VPC2Attachment:
+    Type: "AWS::EC2::TransitGatewayAttachment"
+    Properties:
+      VpcId: !Ref VPC2
+      TransitGatewayId: !Ref TransitGateway
+      SubnetIds:
+        - !Ref VPC2PrivateSubnetA
+        - !Ref VPC2PrivateSubnetB
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC2"
+
+  VPC1ClassARoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref VPC1PrivateSubnetRouteTable
+      DestinationCidrBlock: 10.0.0.0/8
+      TransitGatewayId: !Ref TransitGateway
+    DependsOn: VPC1Attachment
+  
+  VPC2ClassARoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref VPC2PrivateSubnetRouteTable
+      DestinationCidrBlock: 10.0.0.0/8
+      TransitGatewayId: !Ref TransitGateway
+    DependsOn: VPC1Attachment
+
+ # VPC to TGW Dev Associations
+  VPC1Association:
+    Type: "AWS::EC2::TransitGatewayRouteTableAssociation"
+    Properties:
+      TransitGatewayRouteTableId: !Ref AppsVPCsRouteTable
+      TransitGatewayAttachmentId: !Ref VPC1Attachment
+
+  SecurityVPCAssociation:
+    Type: "AWS::EC2::TransitGatewayRouteTableAssociation"
+    Properties:
+      TransitGatewayRouteTableId: !Ref SecurityVPCsRouteTable
+      TransitGatewayAttachmentId: !Ref TGWSecurityAttachment
+
+  VPC2Association:
+    Type: "AWS::EC2::TransitGatewayRouteTableAssociation"
+    Properties:
+      TransitGatewayRouteTableId: !Ref AppsVPCsRouteTable
+      TransitGatewayAttachmentId: !Ref VPC2Attachment
+
+ # VPC to TGW Dev Propagation
+  VPC1Propagation:
+    Type: "AWS::EC2::TransitGatewayRouteTablePropagation"
+    Properties:
+      TransitGatewayRouteTableId: !Ref SecurityVPCsRouteTable
+      TransitGatewayAttachmentId: !Ref VPC1Attachment
+
+  VPC2Propagation:
+    Type: "AWS::EC2::TransitGatewayRouteTablePropagation"
+    Properties:
+      TransitGatewayRouteTableId: !Ref SecurityVPCsRouteTable
+      TransitGatewayAttachmentId: !Ref VPC2Attachment
+
+  SecurityPropagation:
+    Type: "AWS::EC2::TransitGatewayRouteTablePropagation"
+    Properties:
+      TransitGatewayRouteTableId: !Ref AppsVPCsRouteTable
+      TransitGatewayAttachmentId: !Ref TGWSecurityAttachment
+
+  InternalStaticRoute:
+    Type: AWS::EC2::TransitGatewayRoute
+    Properties:
+      DestinationCidrBlock: "10.0.0.0/8"
+      TransitGatewayAttachmentId: !Ref TGWSecurityAttachment
+      TransitGatewayRouteTableId: !Ref AppsVPCsRouteTable
+  
+  VPC1StaticRoute:
+    Type: AWS::EC2::TransitGatewayRoute
+    Properties:
+      DestinationCidrBlock: "10.1.0.0/16"
+      TransitGatewayAttachmentId: !Ref VPC1Attachment
+      TransitGatewayRouteTableId: !Ref AppsVPCsRouteTable
+  
+  VPC2StaticRoute:
+    Type: AWS::EC2::TransitGatewayRoute
+    Properties:
+      DestinationCidrBlock: "10.2.0.0/16"
+      TransitGatewayAttachmentId: !Ref VPC2Attachment
+      TransitGatewayRouteTableId: !Ref AppsVPCsRouteTable
+
+  #VPC
+  VPC1:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPC1CIDR
+      EnableDnsSupport: "true"
+      EnableDnsHostnames: "true"
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC1"
+        - Key: project
+          Value: Networking Demos by GSeib
+
+  VPC1PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC1
+      CidrBlock: !Select [2, !Cidr [!GetAtt VPC1.CidrBlock, 6, 8]]
+      AvailabilityZone:
+        !Select [ 0, !GetAZs  '' ]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "Priv-A Subnet"
+
+  VPC1PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC1
+      CidrBlock: !Select [3, !Cidr [!GetAtt VPC1.CidrBlock, 6, 8]]
+      AvailabilityZone:
+        !Select [ 1, !GetAZs  '' ]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "Priv-B Subnet"
+
+  VPC1PrivateSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC1
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "Private Route Table"
+
+  VPC1PrivateASubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPC1PrivateSubnetRouteTable
+      SubnetId:
+        Ref: VPC1PrivateSubnetA
+
+  VPC1PrivateBSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPC1PrivateSubnetRouteTable
+      SubnetId:
+        Ref: VPC1PrivateSubnetB
+
+  VPC1ServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join
+        - ""
+        - - Ref: "AWS::StackName"
+          - "-"
+          - "VPC1"
+          - "-"
+          - "SSMRole"
+          - "-"
+          - Ref: AWS::Region
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM"
+        - "arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  VPC1InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+        - !Ref VPC1ServerRole
+
+  #ICMP is allowed from anywhere within 10.0.0.0 address space (not recommended for real environments)
+  VPC1Ec2SecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Open-up ports for ICMP and SSH from 10.x.x.x
+      GroupName: !Join
+        - ""
+        - - Ref: "AWS::StackName"
+          - "-"
+          - "VPC1"
+          - "-"
+          - "EC2-SG"
+      VpcId:
+        Ref: VPC1
+      SecurityGroupIngress:
+        - IpProtocol: icmp
+          CidrIp: 10.0.0.0/8
+          FromPort: "-1"
+          ToPort: "-1"
+        - IpProtocol: tcp
+          CidrIp: 10.0.0.0/8
+          FromPort: "80"
+          ToPort: "80"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "AWS::StackName", 'VPC1-EC2'] ]
+
+  VPC1ServerEc2:
+    Type: AWS::EC2::Instance
+    DependsOn: VPC1PrivateSubnetA
+    Properties:
+      SubnetId:
+        Ref: VPC1PrivateSubnetA
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMI]
+      PrivateIpAddress: !Join
+        - "."
+        - - !Select [
+              0,
+              !Split [".", !Select [2, !Cidr [!GetAtt VPC1.CidrBlock, 6, 8]]],
+            ]
+          - !Select [
+              1,
+              !Split [".", !Select [2, !Cidr [!GetAtt VPC1.CidrBlock, 6, 8]]],
+            ]
+          - !Select [
+              2,
+              !Split [".", !Select [2, !Cidr [!GetAtt VPC1.CidrBlock, 6, 8]]],
+            ]
+          - "10"
+      InstanceType: t2.micro
+      SecurityGroupIds:
+        - Ref: VPC1Ec2SecGroup
+      IamInstanceProfile:
+        Ref: VPC1InstanceProfile
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - VPC1
+              - "-"
+              - "Server"
+      UserData:
+        Fn::Base64:
+          Fn::Sub:
+            - |
+              #!/bin/bash
+              /usr/bin/yum -y install httpd php
+              /sbin/chkconfig httpd on
+              /sbin/service httpd start
+                /bin/echo -n "<html>" > /var/www/html/index.php
+                /bin/echo -n '<body style="background-color:lightblue;">' >> /var/www/html/index.php
+                /bin/echo -n "<h1>Gateway Load Balancer Demo - VPC1 Server.</h1><h2> Server private IP is " >> /var/www/html/index.php
+                /opt/aws/bin/ec2-metadata -o | /bin/cut -d" " -f2 >> /var/www/html/index.php
+                /bin/echo -n "Availability Zone: " >> /var/www/html/index.php
+                /opt/aws/bin/ec2-metadata -z | /bin/cut -d" " -f2 >> /var/www/html/index.php
+                /bin/echo "</h2><p>Stack Name: ${thisStack}</p>" >> /var/www/html/index.php
+                /bin/echo "<p>remote ip is <?php \$ip = isset(\$_SERVER['HTTP_CLIENT_IP']) ? \$_SERVER['HTTP_CLIENT_IP'] : isset(\$_SERVER['HTTP_X_FORWARDED_FOR']) ? \$_SERVER['HTTP_X_FORWARDED_FOR'] : \$_SERVER['REMOTE_ADDR']; echo \$ip;?>" >> /var/www/html/index.php
+                /bin/echo "</p>" >> /var/www/html/index.php
+                /bin/echo "remote tcp port is <?php \$port = \$_SERVER['REMOTE_PORT']; echo \$port;?>" >> /var/www/html/index.php
+                /bin/echo "</h3>" >> /var/www/html/index.php
+                /bin/echo "<p></p>" >> /var/www/html/index.php
+                /bin/echo "<h2>Headers</h2>" >> /var/www/html/index.php
+                /bin/echo "<?php \$headers = getallheaders(); foreach(\$headers as \$key=>\$val){echo \$key . ': ' . \$val . '<br>';} ?>" >> /var/www/html/index.php
+                /bin/echo -n "</body>" >> /var/www/html/index.php
+                /bin/echo -n "</html>" >> /var/www/html/index.php
+              /bin/echo "LoadModule remoteip_module modules/mod_remoteip.so" > /etc/httpd/conf.d/remoteip.conf
+              /bin/echo "RemoteIPHeader X-Forwarded-For" >> /etc/httpd/conf.d/remoteip.conf
+              /bin/echo "RemoteIPInternalProxy 100.64.0.0/10" >> /etc/httpd/conf.d/remoteip.conf
+              /bin/echo "RemoteIPProxyProtocol Off" >> /etc/httpd/conf/httpd.conf
+              /bin/echo "RemoteIPProxyProtocolExceptions 127.0.0.1 100.64.0.0/10" >> /etc/httpd/conf/httpd.conf
+              /sbin/service httpd restart
+            - thisStack: !Ref AWS::StackName
+
+  #VPC Public Subnets
+
+  VPC1PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC1
+      CidrBlock: !Select [0, !Cidr [!GetAtt VPC1.CidrBlock, 6, 8]]
+      AvailabilityZone:
+        !Select [ 0, !GetAZs  '' ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "Pub-A Subnet"
+
+  VPC1PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC1
+      CidrBlock: !Select [1, !Cidr [!GetAtt VPC1.CidrBlock, 6, 8]]
+      AvailabilityZone:
+        !Select [ 1, !GetAZs  '' ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "Pub-B Subnet"
+
+  VPC1PublicSubnetARouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC1
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "Public A Route Table"
+
+  VPC1PublicSubnetBRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC1
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "Public B Route Table"
+
+  VPC1PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPC1PublicSubnetARouteTable
+      SubnetId:
+        Ref: VPC1PublicSubnetA
+
+  VPC1PublicSubneBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPC1PublicSubnetBRouteTable
+      SubnetId:
+        Ref: VPC1PublicSubnetB
+
+  VPC1InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "IGW"
+
+  VPC1AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC1
+      InternetGatewayId:
+        Ref: VPC1InternetGateway
+
+  VPC1DirectInternetRouteA:
+    Type: AWS::EC2::Route
+    DependsOn: VPC1InternetGateway
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: VPC1InternetGateway
+      RouteTableId:
+        Ref: VPC1PublicSubnetARouteTable
+
+  VPC1DirectInternetRouteB:
+    Type: AWS::EC2::Route
+    DependsOn: VPC1InternetGateway
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: VPC1InternetGateway
+      RouteTableId:
+        Ref: VPC1PublicSubnetBRouteTable
+  
+  VPC1NATEIP:
+    Type: "AWS::EC2::EIP"
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "AWS::StackName", 'NATGW-VPC1']]
+
+  VPC1NATGateway:
+    DependsOn: VPC1AttachGateway
+    Type: "AWS::EC2::NatGateway"
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+          - VPC1NATEIP
+          - AllocationId
+      SubnetId:
+        Ref: VPC1PublicSubnetA
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "NAT Gateway"
+
+  VPC1NATInternetRoutePrivate:
+    Type: AWS::EC2::Route
+    DependsOn: VPC1InternetGateway
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: VPC1NATGateway
+      RouteTableId:
+        Ref: VPC1PrivateSubnetRouteTable
+
+# Firewall Subnets
+
+  VPC1FirewallSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC1
+      CidrBlock: !Select [4, !Cidr [!GetAtt VPC1.CidrBlock, 6, 8]]
+      AvailabilityZone:
+        !Select [ 0, !GetAZs  '' ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "FW-A Subnet"
+
+  VPC1FirewallSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC1
+      CidrBlock: !Select [5, !Cidr [!GetAtt VPC1.CidrBlock, 6, 8]]
+      AvailabilityZone:
+        !Select [ 1, !GetAZs  '' ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "FW-B Subnet"
+
+  VPC1FirewallSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC1
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "Firewall Route Table"
+
+  VPC1FirewallASubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPC1FirewallSubnetRouteTable
+      SubnetId:
+        Ref: VPC1FirewallSubnetA
+
+  VPC1FirewallBSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPC1FirewallSubnetRouteTable
+      SubnetId:
+        Ref: VPC1FirewallSubnetB
+
+  VPC1FirewallInternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPC1InternetGateway
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: VPC1InternetGateway
+      RouteTableId:
+        Ref: VPC1FirewallSubnetRouteTable
+
+# NLB and Web App
+
+  WebLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    DependsOn: WebInstanceProfile
+    Properties:
+      LaunchTemplateData:
+        UserData:
+          Fn::Base64:
+            Fn::Sub:
+              - |
+                #!/bin/bash
+                /usr/bin/yum -y install httpd php
+                /sbin/chkconfig httpd on
+                /sbin/service httpd start
+                /bin/echo -n "<html>" > /var/www/html/index.php
+                /bin/echo -n '<body style="background-color:lightblue;">' >> /var/www/html/index.php
+                /bin/echo -n "<h1>Gateway Load Balancer Demo.</h1><h2> Server private IP is " >> /var/www/html/index.php
+                /opt/aws/bin/ec2-metadata -o | /bin/cut -d" " -f2 >> /var/www/html/index.php
+                /bin/echo -n "Availability Zone: " >> /var/www/html/index.php
+                /opt/aws/bin/ec2-metadata -z | /bin/cut -d" " -f2 >> /var/www/html/index.php
+                /bin/echo "</h2><p>Stack Name: ${thisStack}</p>" >> /var/www/html/index.php
+                /bin/echo "<p>remote ip is <?php \$ip = isset(\$_SERVER['HTTP_CLIENT_IP']) ? \$_SERVER['HTTP_CLIENT_IP'] : isset(\$_SERVER['HTTP_X_FORWARDED_FOR']) ? \$_SERVER['HTTP_X_FORWARDED_FOR'] : \$_SERVER['REMOTE_ADDR']; echo \$ip;?>" >> /var/www/html/index.php
+                /bin/echo "</p>" >> /var/www/html/index.php
+                /bin/echo "remote tcp port is <?php \$port = \$_SERVER['REMOTE_PORT']; echo \$port;?>" >> /var/www/html/index.php
+                /bin/echo "</h3>" >> /var/www/html/index.php
+                /bin/echo "<p></p>" >> /var/www/html/index.php
+                /bin/echo "<h2>Headers</h2>" >> /var/www/html/index.php
+                /bin/echo "<?php \$headers = getallheaders(); foreach(\$headers as \$key=>\$val){echo \$key . ': ' . \$val . '<br>';} ?>" >> /var/www/html/index.php
+                /bin/echo -n "</body>" >> /var/www/html/index.php
+                /bin/echo -n "</html>" >> /var/www/html/index.php
+                /bin/echo "LoadModule remoteip_module modules/mod_remoteip.so" > /etc/httpd/conf.d/remoteip.conf
+                /bin/echo "RemoteIPHeader X-Forwarded-For" >> /etc/httpd/conf.d/remoteip.conf
+                /bin/echo "RemoteIPInternalProxy 100.64.0.0/10" >> /etc/httpd/conf.d/remoteip.conf
+                /bin/echo "RemoteIPProxyProtocol Off" >> /etc/httpd/conf/httpd.conf
+                /bin/echo "RemoteIPProxyProtocolExceptions 127.0.0.1 100.64.0.0/10" >> /etc/httpd/conf/httpd.conf
+
+                /sbin/service httpd restart
+
+              - thisStack: !Ref AWS::StackName
+        InstanceType: t2.micro
+        IamInstanceProfile:
+          Name: !Ref WebInstanceProfile
+        SecurityGroupIds:
+          - Ref: WebEC2SecGroup
+        ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMI]
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub "${AWS::StackName}-VPC1-NLB-Webserver"
+      LaunchTemplateName:
+        !Join ["-", [Ref: "AWS::StackName", "WebTemplate"]]
+
+  # Create a security group that allows access to HTTP from all 10.0.0.0 addresses (internal)
+  WebEC2SecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Open-up HTTP for all internet
+      GroupName:
+        !Join ["-", [!Ref "AWS::StackName", NLB-EC2]]
+      VpcId: 
+        Ref: VPC1
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: "80"
+          ToPort: "80"
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "AWS::StackName", 'NLB-EC2'] ]
+
+  WebAutoScalingGroup:
+    DependsOn: TargetGroup
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier:
+        - !Ref VPC1PrivateSubnetA
+        - !Ref VPC1PrivateSubnetB
+      LaunchTemplate:
+        LaunchTemplateId: !Ref WebLaunchTemplate
+        Version: !GetAtt WebLaunchTemplate.LatestVersionNumber
+      MinSize: 2
+      MaxSize: 4
+      DesiredCapacity: 2
+      TargetGroupARNs:
+        - !Ref TargetGroup
+
+  WebNLBPublic:
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      Type: network
+      Name: !Sub "${AWS::StackName}-NLB-internet"
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+        - Key: load_balancing.cross_zone.enabled
+          Value: true
+      Subnets:
+        - !Ref VPC1PublicSubnetA
+        - !Ref VPC1PublicSubnetB
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-VPC1-NLB"
+          
+  NLBListenerPublic:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      LoadBalancerArn: !Ref WebNLBPublic
+      Port: 80
+      Protocol: TCP
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      # HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Matcher:
+        HttpCode: 200-399
+      Name: !Join ['-', [!Ref "AWS::StackName", "NLB-TargetGroup" ]]
+      Port: 80
+      Protocol: TCP
+      Tags:
+        - Key: Name
+          Value: !Join ['-', [!Ref "AWS::StackName", "NLB-TargetGroup" ]]
+      VpcId: 
+        Ref: VPC1
+      
+
+  WebServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        !Join ["-", [Ref: "VPC1", Ref: "AWS::StackName", "WebFarmRole"]]
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  WebInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+        - !Ref WebServerRole
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Security VPC, IGW, and IGW Attachment
+# ----------------------------------------------------------------------------------------------------------------------
+
+  SecurityVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref SecurityVPCCIDR
+      Tags:
+        - Key: Name
+          Value: !Join ['-', [!Ref "AWS::StackName", "FWVPC" ]]
+  SecurityIGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Join ['-', [!Ref "AWS::StackName", "FWVPC-IGW" ]]
+
+  SecurityIGWAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref SecurityIGW
+      VpcId: !Ref SecurityVPC
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Subnets
+#-----------------------------------------------------------------------------------------------------------------------
+
+  NATGWSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref SecurityVPC
+      CidrBlock: !Select [2, !Cidr [!GetAtt SecurityVPC.CidrBlock, 8, 8]]
+      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "AWS::StackName", 'FWVPC-NATGW-AZ1']]
+
+  NATGWSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref SecurityVPC
+      CidrBlock: !Select [3, !Cidr [!GetAtt SecurityVPC.CidrBlock, 8, 8]]
+      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "AWS::StackName", 'FWVPC-NATGW-AZ2']]
+
+  TGWSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref SecurityVPC
+      CidrBlock: !Select [4, !Cidr [!GetAtt SecurityVPC.CidrBlock, 8, 8]]
+      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "AWS::StackName", 'FWVPC-TGW-AZ1']]
+
+  TGWSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref SecurityVPC
+      CidrBlock: !Select [5, !Cidr [!GetAtt SecurityVPC.CidrBlock, 8, 8]]
+      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "AWS::StackName", 'FWVPC-TGW-AZ2']]
+
+  GWLBESubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref SecurityVPC
+      CidrBlock: !Select [6, !Cidr [!GetAtt SecurityVPC.CidrBlock, 8, 8]]
+      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "AWS::StackName", 'FWVPC-GWLBE-AZ1']]
+
+  GWLBESubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref SecurityVPC
+      CidrBlock: !Select [7, !Cidr [!GetAtt SecurityVPC.CidrBlock, 8, 8]]
+      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "AWS::StackName", 'FWVPC-GWLBE-AZ2']]
+
+  VMSeriesDataSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref SecurityVPC
+      CidrBlock: !Select [0, !Cidr [!GetAtt SecurityVPC.CidrBlock, 8, 8]]
+      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "AWS::StackName", 'FWVPC-Data-AZ1']]
+
+  VMSeriesDataSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref SecurityVPC
+      CidrBlock: !Select [1, !Cidr [!GetAtt SecurityVPC.CidrBlock, 8, 8]]
+      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "AWS::StackName", 'FWVPC-Data-AZ2']]
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Route Tables - SecurityVPC - GWLBE
+# ----------------------------------------------------------------------------------------------------------------------
+
+  GWLBERouteTableAZ1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref SecurityVPC
+      Tags:
+        - Key : Name
+          Value: !Join ['-' , [!Ref "AWS::StackName", 'FWVPC-GWLBE-AZ1']]
+
+  GWLBEDefaultRouteAZ1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref GWLBERouteTableAZ1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGWAZ1
+
+  GWLBERouteTableAssociationAZ1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref GWLBERouteTableAZ1
+      SubnetId: !Ref GWLBESubnetAZ1
+
+  GWLBEClassARouteAZ1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref GWLBERouteTableAZ1
+      DestinationCidrBlock: 10.0.0.0/8
+      TransitGatewayId: !Ref TransitGateway
+    DependsOn: TGWSecurityAttachment
+
+  GWLBERouteTableAZ2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref SecurityVPC
+      Tags:
+        - Key : Name
+          Value: !Join ['-' , [!Ref "AWS::StackName", 'GWLBE-AZ2']]
+
+  GWLBEDefaultRouteAZ2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref GWLBERouteTableAZ2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGWAZ1
+
+  GWLBERouteTableAssociationAZ2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref GWLBERouteTableAZ2
+      SubnetId: !Ref GWLBESubnetAZ2
+
+  GWLBEClassARouteAZ2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref GWLBERouteTableAZ2
+      DestinationCidrBlock: 10.0.0.0/8
+      TransitGatewayId: !Ref TransitGateway
+    DependsOn: TGWSecurityAttachment
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Route Tables - SecurityVPC - Nat Gateway
+# ----------------------------------------------------------------------------------------------------------------------
+
+  NATGWRouteTableAZ1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref SecurityVPC
+      Tags:
+        - Key : Name
+          Value: !Join ['-' , [!Ref "AWS::StackName", 'NATGW-AZ1']]
+
+  NATGWRouteTableAZ2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref SecurityVPC
+      Tags:
+        - Key : Name
+          Value: !Join ['-' , [!Ref "AWS::StackName", 'NATGW-AZ2']]
+
+  NATGWDefaultRouteAZ1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref NATGWRouteTableAZ1
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref SecurityIGW
+
+  NATGWDefaultRouteAZ2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref NATGWRouteTableAZ2
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref SecurityIGW
+
+
+  NATGWRouteTableAssociationAZ1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref NATGWRouteTableAZ1
+      SubnetId: !Ref NATGWSubnetAZ1
+
+  NATGWRouteTableAssociationAZ2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref NATGWRouteTableAZ2
+      SubnetId: !Ref NATGWSubnetAZ2
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Route Table - SecurityVPC - TGW
+# ----------------------------------------------------------------------------------------------------------------------
+
+  TGWRouteTableAZ1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref SecurityVPC
+      Tags:
+        - Key : Name
+          Value: !Join ['-' , [!Ref "AWS::StackName", 'TGW-AZ1']]
+
+  TGWRouteTableAZ2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref SecurityVPC
+      Tags:
+        - Key : Name
+          Value: !Join ['-' , [!Ref "AWS::StackName", 'TGW-AZ2']]
+
+
+  TGWRouteTableAssociationAZ1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref TGWRouteTableAZ1
+      SubnetId: !Ref TGWSubnetAZ1
+
+  TGWRouteTableAssociationAZ2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref TGWRouteTableAZ2
+      SubnetId: !Ref TGWSubnetAZ2
+
+# ----------------------------------------------------------------------------------------------------------------------
+# SecurityVPC - NAT Gateways with EIPs
+# ----------------------------------------------------------------------------------------------------------------------
+
+  NATGWEIPAZ1:
+    Type: AWS::EC2::EIP
+    DependsOn: SecurityIGWAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "AWS::StackName", 'NATGW-AZ1']]
+
+
+  NATGWAZ1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      SubnetId: !Ref NATGWSubnetAZ1
+      AllocationId: !GetAtt NATGWEIPAZ1.AllocationId
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "AWS::StackName", 'NATGW-AZ1']]
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Route Table - SecurityVPC - Data
+# ----------------------------------------------------------------------------------------------------------------------
+
+  VMSeriesDataRouteTableAZ1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref SecurityVPC
+      Tags:
+        - Key : Name
+          Value: !Join ['-' , [!Ref "AWS::StackName", 'VMSeriesData-AZ1']]
+
+  VMSeriesDataRouteTableAZ2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref SecurityVPC
+      Tags:
+        - Key : Name
+          Value: !Join ['-' , [!Ref "AWS::StackName", 'VMSeriesData-AZ2']]
+
+  VMSeriesDataRouteTableAssociationAZ1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref VMSeriesDataRouteTableAZ1
+      SubnetId: !Ref VMSeriesDataSubnetAZ1
+
+  VMSeriesDataRouteTableAssociationAZ2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref VMSeriesDataRouteTableAZ2
+      SubnetId: !Ref VMSeriesDataSubnetAZ2
+
+
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Security VPC - Management & Data Security Group
+# ----------------------------------------------------------------------------------------------------------------------
+
+  VMSeriesManagementSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref SecurityVPC
+      GroupDescription: VM-Series Management Security Group
+      SecurityGroupIngress:
+        - CidrIp: !Ref RemoteManagementCIDR
+          FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+        - CidrIp: !Ref RemoteManagementCIDR
+          FromPort: 443
+          ToPort: 443
+          IpProtocol: tcp
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "AWS::StackName", 'VMSeries-Management'] ]
+
+  VMSeriesDataSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref SecurityVPC
+      GroupDescription: VM-Series Data Security Group
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: -1
+          ToPort: -1
+          IpProtocol: -1
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "AWS::StackName", 'VMSeries-Data'] ]
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# VM-Series Deployment
+# ----------------------------------------------------------------------------------------------------------------------
+
+  VMSeriesManagementENIAZ1:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: VM-Series Management - AZ1
+      GroupSet: [ !Ref VMSeriesManagementSecurityGroup ]
+      SubnetId: !Ref NATGWSubnetAZ1
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "AWS::StackName", 'VMSeriesManagement-AZ1'] ]
+
+  VMSeriesManagementEIPAZ1:
+    Type: AWS::EC2::EIP
+    DependsOn: SecurityIGWAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "AWS::StackName", 'VMSeriesManagement-AZ1'] ]
+
+  VMSeriesManagementEIPAssociationAZ1:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt VMSeriesManagementEIPAZ1.AllocationId
+      NetworkInterfaceId: !Ref VMSeriesManagementENIAZ1
+
+  VMSeriesDataENIAZ1:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: VM-Series Data - AZ1
+      SourceDestCheck: No
+      GroupSet: [ !Ref VMSeriesDataSecurityGroup ]
+      SubnetId: !Ref VMSeriesDataSubnetAZ1
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "AWS::StackName", 'VMSeries-Data-AZ1'] ]
+
+  VMSeriesManagementENIAZ2:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: VM-Series Management - AZ2
+      GroupSet: [ !Ref VMSeriesManagementSecurityGroup ]
+      SubnetId: !Ref NATGWSubnetAZ2
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "AWS::StackName", 'VMSeries-Management-AZ2'] ]
+
+  VMSeriesManagementEIPAZ2:
+    Type: AWS::EC2::EIP
+    DependsOn: SecurityIGWAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "AWS::StackName", 'VMSeries-Management-AZ2'] ]
+
+  VMSeriesManagementEIPAssociationAZ2:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt VMSeriesManagementEIPAZ2.AllocationId
+      NetworkInterfaceId: !Ref VMSeriesManagementENIAZ2
+
+  VMSeriesDataENIAZ2:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: VM-Series Data - AZ2
+      SourceDestCheck: No
+      GroupSet: [ !Ref VMSeriesDataSecurityGroup ]
+      SubnetId: !Ref VMSeriesDataSubnetAZ2
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "AWS::StackName", 'VMSeries-Data-AZ2'] ]
+
+  VMSeriesInstanceAZ1:
+    Type: AWS::EC2::Instance
+    Properties:
+      DisableApiTermination: false
+      InstanceInitiatedShutdownBehavior: stop
+      EbsOptimized: true
+      ImageId: !Ref VMSeriesAMI
+      InstanceType: !Ref VMSeriesInstanceType
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: gp2
+            DeleteOnTermination: true
+            VolumeSize: 60
+      KeyName: !Ref EC2KeyPair
+      Monitoring: false
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "AWS::StackName", 'VMSeries-AZ1'] ]
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref VMSeriesManagementENIAZ1
+          DeviceIndex: '1'
+        - NetworkInterfaceId: !Ref VMSeriesDataENIAZ1
+          DeviceIndex: '0'
+      IamInstanceProfile: !If [BootstrapVmseries, !Ref VmseriesBootstrapInstanceProfile, ""]
+      UserData:  !If
+        - BootstrapVmseries
+        - !Base64
+          Fn::Join:
+            - ''
+            - - vmseries-bootstrap-aws-s3bucket=
+              - !Ref VmseriesBootstrapS3BucketName
+        - !Base64
+          Fn::Join:
+            - ';'
+            - - type=dhcp-client
+              - ip-address=
+              - default-gateway=
+              - netmask=
+              - ipv6-default-gateway=
+              - vm-auth-key=
+              - panorama-server=
+              - panorama-server-2=
+              - tplname=
+              - dgname=
+              - dns-primary=
+              - dns-secondary=
+              - authcodes=
+              - op-command-modes=jumbo-frame,mgmt-interface-swap
+              - plugin-op-commands=aws-gwlb-inspect:enable
+              - op-cmd-dpdk-pkt-io=on
+              - dhcp-send-hostname=yes
+              - dhcp-send-client-id=yes
+              - dhcp-accept-server-hostname=yes
+              - dhcp-accept-server-domain=yes
+
+  VMSeriesInstanceAZ2:
+    Type: AWS::EC2::Instance
+    Properties:
+      DisableApiTermination: false
+      InstanceInitiatedShutdownBehavior: stop
+      EbsOptimized: true
+      ImageId: !Ref VMSeriesAMI
+      InstanceType: !Ref VMSeriesInstanceType
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: gp2
+            DeleteOnTermination: true
+            VolumeSize: 60
+      KeyName: !Ref EC2KeyPair
+      Monitoring: false
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "AWS::StackName", 'VMSeries-AZ2'] ]
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref VMSeriesManagementENIAZ2
+          DeviceIndex: '1'
+        - NetworkInterfaceId: !Ref VMSeriesDataENIAZ2
+          DeviceIndex: '0'
+      IamInstanceProfile: !If [BootstrapVmseries, !Ref VmseriesBootstrapInstanceProfile, ""]
+      UserData:  !If
+        - BootstrapVmseries
+        - !Base64
+          Fn::Join:
+            - ''
+            - - vmseries-bootstrap-aws-s3bucket=
+              - !Ref VmseriesBootstrapS3BucketName
+        - !Base64
+          Fn::Join:
+            - ';'
+            - - type=dhcp-client
+              - ip-address=
+              - default-gateway=
+              - netmask=
+              - ipv6-default-gateway=
+              - vm-auth-key=
+              - panorama-server=
+              - panorama-server-2=
+              - tplname=
+              - dgname=
+              - dns-primary=
+              - dns-secondary=
+              - authcodes=
+              - op-command-modes=jumbo-frame, mgmt-interface-swap
+              - plugin-op-commands=aws-gwlb-inspect:enable
+              - op-cmd-dpdk-pkt-io=on
+              - dhcp-send-hostname=yes
+              - dhcp-send-client-id=yes
+              - dhcp-accept-server-hostname=yes
+              - dhcp-accept-server-domain=yes
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Transit Gateway and Attachment to Security VPC
+# ----------------------------------------------------------------------------------------------------------------------
+
+  TGWSecurityAttachment:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties:
+      VpcId: !Ref SecurityVPC
+      SubnetIds: [!Ref TGWSubnetAZ1,!Ref TGWSubnetAZ2]
+      TransitGatewayId: !Ref TransitGateway
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "AWS::StackName", 'FWVPC'] ]
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   VM-Series Bootstrap IAM Role
+# ----------------------------------------------------------------------------------------------------------------------
+
+  VmseriesBootstrapRole:
+    Type: AWS::IAM::Role
+    Condition: BootstrapVmseries
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: VmseriesBootstrapRolePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Join
+                  - ''
+                  - - 'arn:aws:s3:::'
+                    - !Ref VmseriesBootstrapS3BucketName
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Join
+                  - ''
+                  - - 'arn:aws:s3:::'
+                    - !Ref VmseriesBootstrapS3BucketName
+                    - /*
+              - Effect: Allow
+                Action:
+                  - cloudwatch:*
+                Resource:
+                  - '*'
+
+  VmseriesBootstrapInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: BootstrapVmseries
+    Properties:
+      Path: /
+      Roles:
+        - !Ref VmseriesBootstrapRole
+
+  S3EndpointAz1:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: BootstrapVmseries
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - 's3:ListBucket'
+            Resource: !Join
+              - ''
+              - - 'arn:aws:s3:::'
+                - !Ref VmseriesBootstrapS3BucketName
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - 's3:GetObject'
+            Resource: !Join
+              - ''
+              - - 'arn:aws:s3:::'
+                - !Ref VmseriesBootstrapS3BucketName
+                - '/*'
+      RouteTableIds:
+        - !Ref VMSeriesDataRouteTableAZ1
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcId: !Ref SecurityVPC
+
+  S3EndpointAz2:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: BootstrapVmseries
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - 's3:ListBucket'
+            Resource: !Join
+              - ''
+              - - 'arn:aws:s3:::'
+                - !Ref VmseriesBootstrapS3BucketName
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - 's3:GetObject'
+            Resource: !Join
+              - ''
+              - - 'arn:aws:s3:::'
+                - !Ref VmseriesBootstrapS3BucketName
+                - '/*'
+      RouteTableIds:
+        - !Ref VMSeriesDataRouteTableAZ2
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcId: !Ref SecurityVPC
+
+
+# VPC2
+
+  VPC2:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPC2CIDR
+      EnableDnsSupport: "true"
+      EnableDnsHostnames: "true"
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC2"
+        - Key: project
+          Value: Networking Demos by GSeib
+
+  VPC2PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC2
+      CidrBlock: !Select [2, !Cidr [!GetAtt VPC2.CidrBlock, 6, 8]]
+      AvailabilityZone:
+        !Select [ 0, !GetAZs  '' ]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC2"
+              - "-"
+              - "Priv-A Subnet"
+
+  VPC2PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC2
+      CidrBlock: !Select [3, !Cidr [!GetAtt VPC2.CidrBlock, 6, 8]]
+      AvailabilityZone:
+        !Select [ 1, !GetAZs  '' ]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC2"
+              - "-"
+              - "Priv-B Subnet"
+
+  VPC2PrivateSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC2
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC2"
+              - "-"
+              - "Private Route Table"
+
+  VPC2PrivateASubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPC2PrivateSubnetRouteTable
+      SubnetId:
+        Ref: VPC2PrivateSubnetA
+
+  VPC2PrivateBSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPC2PrivateSubnetRouteTable
+      SubnetId:
+        Ref: VPC2PrivateSubnetB
+
+  VPC2ServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join
+        - ""
+        - - Ref: "AWS::StackName"
+          - "-"
+          - "VPC2"
+          - "-"
+          - "SSMRole"
+          - "-"
+          - Ref: AWS::Region
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM"
+        - "arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  VPC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+        - !Ref VPC2ServerRole
+
+  #ICMP is allowed from anywhere within 10.0.0.0 address space (not recommended for real environments)
+  VPC2Ec2SecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Open-up ports for ICMP and SSH from 10.x.x.x
+      GroupName: !Join
+        - ""
+        - - Ref: "AWS::StackName"
+          - "-"
+          - "VPC2"
+          - "-"
+          - "EC2-SG"
+      VpcId:
+        Ref: VPC2
+      SecurityGroupIngress:
+        - IpProtocol: icmp
+          CidrIp: 10.0.0.0/8
+          FromPort: "-1"
+          ToPort: "-1"
+        - IpProtocol: tcp
+          CidrIp: 10.0.0.0/8
+          FromPort: "80"
+          ToPort: "80"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "AWS::StackName", 'VPC2-EC2'] ]
+
+
+  VPC2ServerEc2:
+    Type: AWS::EC2::Instance
+    DependsOn: VPC2PrivateSubnetA
+    Properties:
+      SubnetId:
+        Ref: VPC2PrivateSubnetA
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMI]
+      PrivateIpAddress: !Join
+        - "."
+        - - !Select [
+              0,
+              !Split [".", !Select [2, !Cidr [!GetAtt VPC2.CidrBlock, 6, 8]]],
+            ]
+          - !Select [
+              1,
+              !Split [".", !Select [2, !Cidr [!GetAtt VPC2.CidrBlock, 6, 8]]],
+            ]
+          - !Select [
+              2,
+              !Split [".", !Select [2, !Cidr [!GetAtt VPC2.CidrBlock, 6, 8]]],
+            ]
+          - "10"
+      InstanceType: t2.micro
+      SecurityGroupIds:
+        - Ref: VPC2Ec2SecGroup
+      IamInstanceProfile:
+        Ref: VPC2InstanceProfile
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC2"
+              - "-"
+              - "Server"
+      UserData:
+        Fn::Base64:
+          Fn::Sub:
+            - |
+              #!/bin/bash
+              /usr/bin/yum -y install httpd php
+              /sbin/chkconfig httpd on
+              /sbin/service httpd start
+              /bin/echo -n "<html>" > /var/www/html/index.php
+              /bin/echo -n '<body style="background-color:lightblue;">' >> /var/www/html/index.php
+              /bin/echo -n "<h1>Gateway Load Balancer Demo - VPC2 Server.</h1><h2> Server private IP is " >> /var/www/html/index.php
+              /opt/aws/bin/ec2-metadata -o | /bin/cut -d" " -f2 >> /var/www/html/index.php
+              /bin/echo -n "Availability Zone: " >> /var/www/html/index.php
+              /opt/aws/bin/ec2-metadata -z | /bin/cut -d" " -f2 >> /var/www/html/index.php
+              /bin/echo "</h2><p>Stack Name: ${thisStack}</p>" >> /var/www/html/index.php
+              /bin/echo "<p>remote ip is <?php \$ip = isset(\$_SERVER['HTTP_CLIENT_IP']) ? \$_SERVER['HTTP_CLIENT_IP'] : isset(\$_SERVER['HTTP_X_FORWARDED_FOR']) ? \$_SERVER['HTTP_X_FORWARDED_FOR'] : \$_SERVER['REMOTE_ADDR']; echo \$ip;?>" >> /var/www/html/index.php
+              /bin/echo "</p>" >> /var/www/html/index.php
+              /bin/echo "remote tcp port is <?php \$port = \$_SERVER['REMOTE_PORT']; echo \$port;?>" >> /var/www/html/index.php
+              /bin/echo "</h3>" >> /var/www/html/index.php
+              /bin/echo "<p></p>" >> /var/www/html/index.php
+              /bin/echo "<h2>Headers</h2>" >> /var/www/html/index.php
+              /bin/echo "<?php \$headers = getallheaders(); foreach(\$headers as \$key=>\$val){echo \$key . ': ' . \$val . '<br>';} ?>" >> /var/www/html/index.php
+              /bin/echo -n "</body>" >> /var/www/html/index.php
+              /bin/echo -n "</html>" >> /var/www/html/index.php
+              /bin/echo "LoadModule remoteip_module modules/mod_remoteip.so" > /etc/httpd/conf.d/remoteip.conf
+              /bin/echo "RemoteIPHeader X-Forwarded-For" >> /etc/httpd/conf.d/remoteip.conf
+              /bin/echo "RemoteIPInternalProxy 100.64.0.0/10" >> /etc/httpd/conf.d/remoteip.conf
+              /bin/echo "RemoteIPProxyProtocol Off" >> /etc/httpd/conf/httpd.conf
+              /bin/echo "RemoteIPProxyProtocolExceptions 127.0.0.1 100.64.0.0/10" >> /etc/httpd/conf/httpd.conf
+              /sbin/service httpd restart
+            - thisStack: !Ref AWS::StackName
+
+  #VPC2 Public Subnets
+
+  VPC2PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC2
+      CidrBlock: !Select [0, !Cidr [!GetAtt VPC2.CidrBlock, 6, 8]]
+      AvailabilityZone:
+        !Select [ 0, !GetAZs  '' ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC2"
+              - "-"
+              - "Pub-A Subnet"
+
+  VPC2PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC2
+      CidrBlock: !Select [1, !Cidr [!GetAtt VPC2.CidrBlock, 6, 8]]
+      AvailabilityZone:
+        !Select [ 1, !GetAZs  '' ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC2"
+              - "-"
+              - "Pub-B Subnet"
+
+  VPC2PublicSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC2
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC2"
+              - "-"
+              - "Public Route Table"
+
+  VPC2PublicASubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPC2PublicSubnetRouteTable
+      SubnetId:
+        Ref: VPC2PublicSubnetA
+
+  VPC2PublicBSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPC2PublicSubnetRouteTable
+      SubnetId:
+        Ref: VPC2PublicSubnetB
+
+  VPC2InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC2"
+              - "-"
+              - "IGW"
+
+  VPC2AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC2
+      InternetGatewayId:
+        Ref: VPC2InternetGateway
+
+  VPC2DirectInternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPC2InternetGateway
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: VPC2InternetGateway
+      RouteTableId:
+        Ref: VPC2PublicSubnetRouteTable
+
+  VPC2NATEIP:
+    Type: "AWS::EC2::EIP"
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "AWS::StackName", 'NATGW-VPC2']]
+
+  VPC2NATGateway:
+    DependsOn: VPC2AttachGateway
+    Type: "AWS::EC2::NatGateway"
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+          - VPC2NATEIP
+          - AllocationId
+      SubnetId:
+        Ref: VPC2PublicSubnetA
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "AWS::StackName"
+              - "-"
+              - "VPC2"
+              - "-"
+              - "NAT Gateway"
+
+  VPC2NATInternetRoutePrivate:
+    Type: AWS::EC2::Route
+    DependsOn: VPC2InternetGateway
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: VPC2NATGateway
+      RouteTableId:
+        Ref: VPC2PrivateSubnetRouteTable
+
+
+
+
+# ======================================================================================================================
+#   Outputs
+# ======================================================================================================================
+
+Outputs:
+
+
+  PA1SSH:
+    Description: "ssh command to Palo Alto 1"
+    Value:
+      !Join [
+        "",
+        ["ssh -i ~/.ssh/", Ref: "EC2KeyPair", ".pem admin@", !Ref "VMSeriesManagementEIPAZ1"],
+      ]
+    Export:
+      Name: !Sub "${AWS::StackName}-PA-1-ssh"
+
+  PA1URL:
+    Description: "URL to Palo Alto 1"
+    Value:
+      !Join [
+        "",
+        ["https://",!Ref "VMSeriesManagementEIPAZ1", "/"],
+      ]
+    Export:
+      Name: !Sub "${AWS::StackName}-PA1-URL"
+
+  PA2SSH:
+    Description: "ssh command to Palo Alto 1"
+    Value:
+      !Join [
+        "",
+        ["ssh -i ~/.ssh/", Ref: "EC2KeyPair", ".pem admin@", !Ref "VMSeriesManagementEIPAZ2"],
+      ]
+    Export:
+      Name: !Sub "${AWS::StackName}-PA-2-ssh"
+  
+  PA2URL:
+    Description: "URL to Palo Alto 2"
+    Value:
+      !Join [
+        "",
+        ["https://",!Ref "VMSeriesManagementEIPAZ2", "/"],
+      ]
+    Export:
+      Name: !Sub "${AWS::StackName}-PA2-URL"
+
+  AppURL:
+    Description: "URL to NLB"
+    Value:
+      !Join [
+        "",
+        ["http://", !GetAtt "WebNLBPublic.DNSName", "/"],
+      ]
+    Export:
+      Name: !Sub "${AWS::StackName}-APP-URL" 

@@ -1,0 +1,528 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  EC2 Deployment for the GWLB that includes servers and test instances. 
+
+# ======================================================================================================================
+#   Parameters
+# ======================================================================================================================
+
+Parameters:
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   Passed Pramaters from Main Stack
+# ----------------------------------------------------------------------------------------------------------------------
+
+  #Desired Stack Name
+  GlobalStackName:
+    Description: Stackname that you would like to uniquely identify your resources.
+    Type: String
+
+  VPC1: 
+    Type: AWS::EC2::VPC::Id
+    Description: 'The VPC ID'
+  VPC1CIDR: 
+    Type: String
+    Description: 'VPC1 Cidr range'
+  VPC1PrivateSubnetA: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+  VPC1PrivateSubnetB: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+  VPC1PublicSubnetA:
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+  VPC1PublicSubnetB: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+
+  VPC2: 
+    Type: AWS::EC2::VPC::Id
+    Description: 'The VPC ID'
+  VPC2CIDR: 
+    Type: String
+    Description: 'VPC2 Cidr range'
+  VPC2PrivateSubnetA: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+  VPC2PrivateSubnetB: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+  VPC2PublicSubnetA: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+  VPC2PublicSubnetB: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+
+  SecurityVPCCIDR:
+    Type: String
+    Description: Provide a/16 CIDR space.
+
+  VPCInstanceProfile: 
+    Type: String
+    Description: 'Instance Profile for VPCs'
+  WebInstanceProfile:
+    Type: String
+    Description: 'Instance profile resource ID'
+
+  #Management Network CIDR
+  RemoteManagementCIDR:
+    Description: >-
+      Remote Management CIDR to be allowed management access to VM-Series Firewall (e.g. 192.168.0.0/25)
+    Type: String
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   EC2 Parameters
+# ----------------------------------------------------------------------------------------------------------------------
+
+  #Amazon EC2 Latest Parameter ID
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+
+  #EC2 key pair for the deployment - Only required for VM Series, we use SSM to access the other infrastructure servers
+  # EC2KeyPair:
+  #   Description: >-
+  #     AWS EC2 Instance Key Pair for authentication to the VM-Series Firewalls.
+  #   Type: AWS::EC2::KeyPair::KeyName
+  #   AllowedPattern: .+
+  #   ConstraintDescription: Must set an EC2 Key Pair for VM-Series
+
+
+  
+# ======================================================================================================================
+#   Mappings
+# ======================================================================================================================
+
+Mappings:
+  RegionMap:
+    "eu-north-1":
+      AMI: "ami-3f36be41"
+    "ap-south-1":
+      AMI: "ami-0d2692b6acea72ee6"
+    "eu-west-3":
+      AMI: "ami-0adcddd3324248c4c"
+    "eu-west-2":
+      AMI: "ami-0d8e27447ec2c8410"
+    "eu-west-1":
+      AMI: "ami-0bbc25e23a7640b9b"
+    "ap-northeast-3":
+      AMI: "ami-0ee933a7f81beb045"
+    "ap-northeast-2":
+      AMI: "ami-095ca789e0549777d"
+    "ap-northeast-1":
+      AMI: "ami-0c3fd0f5d33134a76"
+    "sa-east-1":
+      AMI: "ami-058943e7d9b9cabfb"
+    "ca-central-1":
+      AMI: "ami-0d4ae09ec9361d8ac"
+    "ap-southeast-1":
+      AMI: "ami-01f7527546b557442"
+    "ap-southeast-2":
+      AMI: "ami-0dc96254d5535925f"
+    "eu-central-1":
+      AMI: "ami-0cc293023f983ed53"
+    "us-east-1":
+      AMI: "ami-0b898040803850657"
+    "us-east-2":
+      AMI: "ami-0d8f6eb4f641ef691"
+    "us-west-1":
+      AMI: "ami-056ee704806822732"
+    "us-west-2":
+      AMI: "ami-082b5a644766e0e6f"
+
+
+# ======================================================================================================================
+#   Resources
+# ======================================================================================================================
+
+Resources:
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   Security Group Resources
+# ----------------------------------------------------------------------------------------------------------------------
+
+  #ICMP is allowed from anywhere within 10.0.0.0 address space (not recommended for real environments)
+  VPC1Ec2SecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Open-up ports for ICMP and SSH from 10.x.x.x
+      GroupName: !Sub ${GlobalStackName}-VPC1-EC2-SG
+      VpcId: !Ref VPC1
+      SecurityGroupIngress:
+        - IpProtocol: icmp
+          CidrIp: 10.0.0.0/8
+          FromPort: "-1"
+          ToPort: "-1"
+        - IpProtocol: tcp
+          CidrIp: 10.0.0.0/8
+          FromPort: "80"
+          ToPort: "80"
+        - IpProtocol: tcp
+          CidrIp: 10.0.0.0/8
+          FromPort: "5051"
+          ToPort: "5051"
+        - IpProtocol: tcp
+          FromPort: "443"
+          ToPort: "443"
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'VPC1-EC2'] ]
+
+  VPC2Ec2SecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Open-up ports for ICMP and SSH from 10.x.x.x
+      GroupName: !Sub ${GlobalStackName}-VPC2-EC2-SG
+      VpcId: !Ref VPC2
+      SecurityGroupIngress:
+        - IpProtocol: icmp
+          CidrIp: 10.0.0.0/8
+          FromPort: "-1"
+          ToPort: "-1"
+        - IpProtocol: tcp
+          CidrIp: 10.0.0.0/8
+          FromPort: "80"
+          ToPort: "80"
+        - IpProtocol: tcp
+          CidrIp: 10.0.0.0/8
+          FromPort: "5051"
+          ToPort: "5051"
+        - IpProtocol: tcp
+          FromPort: "443"
+          ToPort: "443"
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'VPC2-EC2'] ]
+
+  # Create a security group that allows access to HTTP from all 10.0.0.0 addresses (internal)
+  WebEC2SecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Open-up HTTP and HTTPS for all internet
+      GroupName:
+        !Join ["-", [!Ref "GlobalStackName", NLB-EC2]]
+      VpcId: !Ref VPC1
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: "80"
+          ToPort: "80"
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: "443"
+          ToPort: "443"
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'NLB-EC2'] ]
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   EC2 Resources
+# ----------------------------------------------------------------------------------------------------------------------
+    
+  EC2VPC1Server1AZ1:
+    Type: AWS::EC2::Instance
+    #DependsOn: VPC1PrivateSubnetA      #DependsOn must be a string value/type
+    Properties:
+      SubnetId: !Ref VPC1PrivateSubnetA
+      ImageId: !Ref LatestAmiId
+      PrivateIpAddress: !Join
+        - "."
+        - - !Select [
+              0,
+              !Split [".", !Select [2, !Cidr [!Ref VPC1CIDR, 6, 8]]],
+            ]
+          - !Select [
+              1,
+              !Split [".", !Select [2, !Cidr [!Ref VPC1CIDR, 6, 8]]],
+            ]
+          - !Select [
+              2,
+              !Split [".", !Select [2, !Cidr [!Ref VPC1CIDR, 6, 8]]],
+            ]
+          - "10"
+      InstanceType: t2.micro
+      SecurityGroupIds:
+        - !Ref VPC1Ec2SecGroup
+      IamInstanceProfile: !Ref VPCInstanceProfile
+      Tags:
+        - Key: Name
+          Value: !Sub ${GlobalStackName}-VPC1-Server-1-AZ1
+      UserData:
+        Fn::Base64:
+          Fn::Sub:
+            - |
+              #!/bin/bash
+              /usr/bin/yum -y install httpd php
+              /sbin/chkconfig httpd on
+              /sbin/service httpd start
+                /bin/echo -n "<html>" > /var/www/html/index.php
+                /bin/echo -n '<body style="background-color:lightblue;">' >> /var/www/html/index.php
+                /bin/echo -n "<h1>Gateway Load Balancer Demo - VPC1 Server.</h1><h2> Server private IP is " >> /var/www/html/index.php
+                /opt/aws/bin/ec2-metadata -o | /bin/cut -d" " -f2 >> /var/www/html/index.php
+                /bin/echo -n "Availability Zone: " >> /var/www/html/index.php
+                /opt/aws/bin/ec2-metadata -z | /bin/cut -d" " -f2 >> /var/www/html/index.php
+                /bin/echo "</h2><p>Stack Name: ${thisStack}</p>" >> /var/www/html/index.php
+                /bin/echo "<p>remote ip is <?php \$ip = isset(\$_SERVER['HTTP_CLIENT_IP']) ? \$_SERVER['HTTP_CLIENT_IP'] : isset(\$_SERVER['HTTP_X_FORWARDED_FOR']) ? \$_SERVER['HTTP_X_FORWARDED_FOR'] : \$_SERVER['REMOTE_ADDR']; echo \$ip;?>" >> /var/www/html/index.php
+                /bin/echo "</p>" >> /var/www/html/index.php
+                /bin/echo "remote tcp port is <?php \$port = \$_SERVER['REMOTE_PORT']; echo \$port;?>" >> /var/www/html/index.php
+                /bin/echo "</h3>" >> /var/www/html/index.php
+                /bin/echo "<p></p>" >> /var/www/html/index.php
+                /bin/echo "<h2>Headers</h2>" >> /var/www/html/index.php
+                /bin/echo "<?php \$headers = getallheaders(); foreach(\$headers as \$key=>\$val){echo \$key . ': ' . \$val . '<br>';} ?>" >> /var/www/html/index.php
+                /bin/echo -n "</body>" >> /var/www/html/index.php
+                /bin/echo -n "</html>" >> /var/www/html/index.php
+              /bin/echo "LoadModule remoteip_module modules/mod_remoteip.so" > /etc/httpd/conf.d/remoteip.conf
+              /bin/echo "RemoteIPHeader X-Forwarded-For" >> /etc/httpd/conf.d/remoteip.conf
+              /bin/echo "RemoteIPInternalProxy 100.64.0.0/10" >> /etc/httpd/conf.d/remoteip.conf
+              /bin/echo "RemoteIPProxyProtocol Off" >> /etc/httpd/conf/httpd.conf
+              /bin/echo "RemoteIPProxyProtocolExceptions 127.0.0.1 100.64.0.0/10" >> /etc/httpd/conf/httpd.conf
+              /sbin/service httpd restart
+            - thisStack: !Ref GlobalStackName
+
+  EC2VPC2Server1AZ1:
+    Type: AWS::EC2::Instance
+    #DependsOn: VPC2PrivateSubnetA
+    Properties:
+      SubnetId: !Ref VPC2PrivateSubnetA
+      ImageId: !Ref LatestAmiId 
+      PrivateIpAddress: !Join
+        - "."
+        - - !Select [
+              0,
+              !Split [".", !Select [2, !Cidr [!Ref VPC2CIDR, 6, 8]]],
+            ]
+          - !Select [
+              1,
+              !Split [".", !Select [2, !Cidr [!Ref VPC2CIDR, 6, 8]]],
+            ]
+          - !Select [
+              2,
+              !Split [".", !Select [2, !Cidr [!Ref VPC2CIDR, 6, 8]]],
+            ]
+          - "10"
+      InstanceType: t2.micro
+      SecurityGroupIds: 
+        - !Ref VPC2Ec2SecGroup
+      IamInstanceProfile: !Ref VPCInstanceProfile
+      Tags:
+        - Key: Name
+          Value: !Sub ${GlobalStackName}-VPC2-Server-1-AZ1
+      UserData:
+        Fn::Base64:
+          Fn::Sub:
+            - |
+              #!/bin/bash
+              /usr/bin/yum -y install httpd php
+              /sbin/chkconfig httpd on
+              /sbin/service httpd start
+              /bin/echo -n "<html>" > /var/www/html/index.php
+              /bin/echo -n '<body style="background-color:lightblue;">' >> /var/www/html/index.php
+              /bin/echo -n "<h1>Gateway Load Balancer Demo - VPC2 Server.</h1><h2> Server private IP is " >> /var/www/html/index.php
+              /opt/aws/bin/ec2-metadata -o | /bin/cut -d" " -f2 >> /var/www/html/index.php
+              /bin/echo -n "Availability Zone: " >> /var/www/html/index.php
+              /opt/aws/bin/ec2-metadata -z | /bin/cut -d" " -f2 >> /var/www/html/index.php
+              /bin/echo "</h2><p>Stack Name: ${thisStack}</p>" >> /var/www/html/index.php
+              /bin/echo "<p>remote ip is <?php \$ip = isset(\$_SERVER['HTTP_CLIENT_IP']) ? \$_SERVER['HTTP_CLIENT_IP'] : isset(\$_SERVER['HTTP_X_FORWARDED_FOR']) ? \$_SERVER['HTTP_X_FORWARDED_FOR'] : \$_SERVER['REMOTE_ADDR']; echo \$ip;?>" >> /var/www/html/index.php
+              /bin/echo "</p>" >> /var/www/html/index.php
+              /bin/echo "remote tcp port is <?php \$port = \$_SERVER['REMOTE_PORT']; echo \$port;?>" >> /var/www/html/index.php
+              /bin/echo "</h3>" >> /var/www/html/index.php
+              /bin/echo "<p></p>" >> /var/www/html/index.php
+              /bin/echo "<h2>Headers</h2>" >> /var/www/html/index.php
+              /bin/echo "<?php \$headers = getallheaders(); foreach(\$headers as \$key=>\$val){echo \$key . ': ' . \$val . '<br>';} ?>" >> /var/www/html/index.php
+              /bin/echo -n "</body>" >> /var/www/html/index.php
+              /bin/echo -n "</html>" >> /var/www/html/index.php
+              /bin/echo "LoadModule remoteip_module modules/mod_remoteip.so" > /etc/httpd/conf.d/remoteip.conf
+              /bin/echo "RemoteIPHeader X-Forwarded-For" >> /etc/httpd/conf.d/remoteip.conf
+              /bin/echo "RemoteIPInternalProxy 100.64.0.0/10" >> /etc/httpd/conf.d/remoteip.conf
+              /bin/echo "RemoteIPProxyProtocol Off" >> /etc/httpd/conf/httpd.conf
+              /bin/echo "RemoteIPProxyProtocolExceptions 127.0.0.1 100.64.0.0/10" >> /etc/httpd/conf/httpd.conf
+              /sbin/service httpd restart
+            - thisStack: !Ref GlobalStackName
+
+  EC2VPC2Server2AZ2:
+    Type: AWS::EC2::Instance
+    #DependsOn: VPC2PrivateSubnetA
+    Properties:
+      SubnetId: !Ref VPC2PrivateSubnetB
+      ImageId: !Ref LatestAmiId 
+      PrivateIpAddress: "10.2.3.10"
+      InstanceType: t2.micro
+      SecurityGroupIds:
+        - !Ref VPC2Ec2SecGroup
+      IamInstanceProfile: !Ref VPCInstanceProfile
+      Tags:
+        - Key: Name
+          Value: !Sub ${GlobalStackName}-VPC2-Server-2-AZ2
+      UserData:
+        Fn::Base64:
+          Fn::Sub:
+            - |
+              #!/bin/bash
+              /usr/bin/yum -y install httpd php
+              /sbin/chkconfig httpd on
+              /sbin/service httpd start
+              /bin/echo -n "<html>" > /var/www/html/index.php
+              /bin/echo -n '<body style="background-color:lightblue;">' >> /var/www/html/index.php
+              /bin/echo -n "<h1>Gateway Load Balancer Demo - VPC2 Server.</h1><h2> Server private IP is " >> /var/www/html/index.php
+              /opt/aws/bin/ec2-metadata -o | /bin/cut -d" " -f2 >> /var/www/html/index.php
+              /bin/echo -n "Availability Zone: " >> /var/www/html/index.php
+              /opt/aws/bin/ec2-metadata -z | /bin/cut -d" " -f2 >> /var/www/html/index.php
+              /bin/echo "</h2><p>Stack Name: ${thisStack}</p>" >> /var/www/html/index.php
+              /bin/echo "<p>remote ip is <?php \$ip = isset(\$_SERVER['HTTP_CLIENT_IP']) ? \$_SERVER['HTTP_CLIENT_IP'] : isset(\$_SERVER['HTTP_X_FORWARDED_FOR']) ? \$_SERVER['HTTP_X_FORWARDED_FOR'] : \$_SERVER['REMOTE_ADDR']; echo \$ip;?>" >> /var/www/html/index.php
+              /bin/echo "</p>" >> /var/www/html/index.php
+              /bin/echo "remote tcp port is <?php \$port = \$_SERVER['REMOTE_PORT']; echo \$port;?>" >> /var/www/html/index.php
+              /bin/echo "</h3>" >> /var/www/html/index.php
+              /bin/echo "<p></p>" >> /var/www/html/index.php
+              /bin/echo "<h2>Headers</h2>" >> /var/www/html/index.php
+              /bin/echo "<?php \$headers = getallheaders(); foreach(\$headers as \$key=>\$val){echo \$key . ': ' . \$val . '<br>';} ?>" >> /var/www/html/index.php
+              /bin/echo -n "</body>" >> /var/www/html/index.php
+              /bin/echo -n "</html>" >> /var/www/html/index.php
+              /bin/echo "LoadModule remoteip_module modules/mod_remoteip.so" > /etc/httpd/conf.d/remoteip.conf
+              /bin/echo "RemoteIPHeader X-Forwarded-For" >> /etc/httpd/conf.d/remoteip.conf
+              /bin/echo "RemoteIPInternalProxy 100.64.0.0/10" >> /etc/httpd/conf.d/remoteip.conf
+              /bin/echo "RemoteIPProxyProtocol Off" >> /etc/httpd/conf/httpd.conf
+              /bin/echo "RemoteIPProxyProtocolExceptions 127.0.0.1 100.64.0.0/10" >> /etc/httpd/conf/httpd.conf
+              /sbin/service httpd restart
+            - thisStack: !Ref GlobalStackName
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   NLB & WebApp Resources
+# ----------------------------------------------------------------------------------------------------------------------
+
+  WebLaunchTemplate:
+      Type: AWS::EC2::LaunchTemplate
+      #DependsOn: WebInstanceProfile
+      Properties:
+        LaunchTemplateData:
+          UserData:
+            Fn::Base64:
+              Fn::Sub:
+                - |
+                  #!/bin/bash
+                  /usr/bin/yum -y install httpd php
+                  /sbin/chkconfig httpd on
+                  /sbin/service httpd start
+                  /bin/echo -n "<html>" > /var/www/html/index.php
+                  /bin/echo -n '<body style="background-color:lightblue;">' >> /var/www/html/index.php
+                  /bin/echo -n "<h1>Gateway Load Balancer Demo.</h1><h2> Server private IP is " >> /var/www/html/index.php
+                  /opt/aws/bin/ec2-metadata -o | /bin/cut -d" " -f2 >> /var/www/html/index.php
+                  /bin/echo -n "Availability Zone: " >> /var/www/html/index.php
+                  /opt/aws/bin/ec2-metadata -z | /bin/cut -d" " -f2 >> /var/www/html/index.php
+                  /bin/echo "</h2><p>Stack Name: ${thisStack}</p>" >> /var/www/html/index.php
+                  /bin/echo "<p>remote ip is <?php \$ip = isset(\$_SERVER['HTTP_CLIENT_IP']) ? \$_SERVER['HTTP_CLIENT_IP'] : isset(\$_SERVER['HTTP_X_FORWARDED_FOR']) ? \$_SERVER['HTTP_X_FORWARDED_FOR'] : \$_SERVER['REMOTE_ADDR']; echo \$ip;?>" >> /var/www/html/index.php
+                  /bin/echo "</p>" >> /var/www/html/index.php
+                  /bin/echo "remote tcp port is <?php \$port = \$_SERVER['REMOTE_PORT']; echo \$port;?>" >> /var/www/html/index.php
+                  /bin/echo "</h3>" >> /var/www/html/index.php
+                  /bin/echo "<p></p>" >> /var/www/html/index.php
+                  /bin/echo "<h2>Headers</h2>" >> /var/www/html/index.php
+                  /bin/echo "<?php \$headers = getallheaders(); foreach(\$headers as \$key=>\$val){echo \$key . ': ' . \$val . '<br>';} ?>" >> /var/www/html/index.php
+                  /bin/echo -n "</body>" >> /var/www/html/index.php
+                  /bin/echo -n "</html>" >> /var/www/html/index.php
+                  /bin/echo "LoadModule remoteip_module modules/mod_remoteip.so" > /etc/httpd/conf.d/remoteip.conf
+                  /bin/echo "RemoteIPHeader X-Forwarded-For" >> /etc/httpd/conf.d/remoteip.conf
+                  /bin/echo "RemoteIPInternalProxy 100.64.0.0/10" >> /etc/httpd/conf.d/remoteip.conf
+                  /bin/echo "RemoteIPProxyProtocol Off" >> /etc/httpd/conf/httpd.conf
+                  /bin/echo "RemoteIPProxyProtocolExceptions 127.0.0.1 100.64.0.0/10" >> /etc/httpd/conf/httpd.conf
+
+                  /sbin/service httpd restart
+
+                - thisStack: !Ref GlobalStackName
+          InstanceType: t2.micro
+          IamInstanceProfile:
+            Name: !Ref WebInstanceProfile
+          SecurityGroupIds:
+            - !Ref WebEC2SecGroup
+          ImageId: !Ref LatestAmiId
+          TagSpecifications:
+            - ResourceType: instance
+              Tags:
+                - Key: Name
+                  Value: !Sub ${GlobalStackName}-VPC1-NLB-Webserver
+        LaunchTemplateName:
+          !Join ["-", [Ref: "GlobalStackName", "WebTemplate"]]
+  
+  WebAutoScalingGroup:
+    DependsOn: TargetGroup
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier:
+        - !Ref VPC1PrivateSubnetA
+        - !Ref VPC1PrivateSubnetB
+      LaunchTemplate:
+        LaunchTemplateId: !Ref WebLaunchTemplate
+        Version: !GetAtt WebLaunchTemplate.LatestVersionNumber
+      MinSize: 2
+      MaxSize: 4
+      DesiredCapacity: 2
+      TargetGroupARNs:
+        - !Ref TargetGroup
+
+  WebNLBPublic:
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      Type: network
+      Name: !Sub ${GlobalStackName}-NLB-internet
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+        - Key: load_balancing.cross_zone.enabled
+          Value: true
+      Subnets:
+        - !Ref VPC1PublicSubnetA
+        - !Ref VPC1PublicSubnetB
+      Tags:
+        - Key: Name
+          Value: !Sub "${GlobalStackName}-VPC1-NLB"
+
+  NLBListenerPublic:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      LoadBalancerArn: !Ref WebNLBPublic
+      Port: 80
+      Protocol: TCP
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      # HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Matcher:
+        HttpCode: 200-399
+      Name: !Join ['-', [!Ref "GlobalStackName", "NLB-TargetGroup" ]]
+      Port: 80
+      Protocol: TCP
+      Tags:
+        - Key: Name
+          Value: !Join ['-', [!Ref "GlobalStackName", "NLB-TargetGroup" ]]
+      VpcId: 
+        Ref: VPC1
+
+# ======================================================================================================================
+#   Outputs
+# ======================================================================================================================
+
+Outputs: 
+
+  #NLB VPC1 DNS Output
+  NLBApplicationURL: 
+    Description: "URL address in order to access your NLB"
+    Value:
+      !Join [
+        "",
+        ["http://", !GetAtt "WebNLBPublic.DNSName", "/"],
+      ]
+    Export:
+      Name: !Sub ${GlobalStackName}-Application-URL
+
+

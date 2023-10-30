@@ -1,0 +1,107 @@
+config system dns
+    unset primary
+    unset secondary
+end
+config system global
+    set admin-sport "{ADMIN_PORT}"
+end
+config system auto-scale
+    set status enable
+    set sync-interface "{SYNC_INTERFACE}"
+    set hb-interval "{HEART_BEAT_INTERVAL}"
+    set role primary
+    set callback-url "{CALLBACK_URL}"
+    set psksecret "{PSK_SECRET}"
+end
+
+##########################################################
+# System Gevene are below
+# Update the remote-ip with the IP used for the GWLB
+
+config system geneve
+    edit "awsgeneve-a"
+        set interface "port1"
+        set type ppp
+        set remote-ip 10.0.4.147
+    next
+    edit "awsgeneve-b"
+        set interface "port1"
+        set type ppp
+        set remote-ip 10.0.5.218
+    next
+end
+
+config system zone
+edit "gwlb1-tunnels"
+set interface "awsgeneve-a" "awsgeneve-b"
+next
+end
+
+config router static
+edit 1
+set distance 5
+set priority 100
+set device "awsgeneve-a"
+next
+edit 2
+set distance 5
+set priority 100
+set device "awsgeneve-b"
+next
+end
+
+config router policy
+edit 1
+set input-device "awsgeneve-a"
+set dst "10.0.0.0/255.0.0.0"
+set output-device "awsgeneve-a"
+next
+edit 2
+set input-device "awsgeneve-b"
+set dst "10.0.0.0/255.0.0.0"
+set output-device "awsgeneve-b"
+next
+end
+
+config firewall address
+edit "VPC"
+set subnet 10.0.0.0 255.0.0.0
+next
+end
+
+config firewall policy
+edit 1
+set name "egress"
+set srcintf "gwlb1-tunnels"
+set dstintf "port1"
+set srcaddr "VPC"
+set dstaddr "all"
+set action accept
+set schedule "always"
+set service "ALL"
+set logtraffic all
+set nat enable
+next
+edit 2
+set name "ingress"
+set srcintf "gwlb1-tunnels"
+set dstintf "gwlb1-tunnels"
+set srcaddr "all"
+set dstaddr "VPC"
+set action accept
+set schedule "always"
+set service "HTTP" "HTTPS"
+set logtraffic all
+next
+edit 3
+set name "east-west"
+set srcintf "gwlb1-tunnels"
+set dstintf "gwlb1-tunnels"
+set srcaddr "VPC"
+set dstaddr "VPC"
+set action accept
+set schedule "always"
+set service "ALL"
+set logtraffic all
+next
+end

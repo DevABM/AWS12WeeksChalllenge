@@ -1,0 +1,597 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  Deploys the GWLB into the Security VPC with necessary routing.
+
+# ======================================================================================================================
+#   Parameters
+# ======================================================================================================================
+
+Parameters:
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   Passed Pramaters from Main Stack
+# ----------------------------------------------------------------------------------------------------------------------
+
+  #Desired Stack Name
+  GlobalStackName:
+    Description: 'Stackname that you would like to uniquely identify your resources.'
+    Type: String
+
+  GWLBLabS3BootstrapBucket:
+    Description: 'Bucket used for GWLB Bootstrapping'
+    Type: String
+
+  SecurityVPC: 
+    Type: AWS::EC2::VPC::Id
+    Description: 'The VPC ID'
+  SecurityVPCCIDR:
+    Type: String
+    Description: Provide a/16 CIDR space.
+  SecurityVPCGWLBESubnetAZ1:
+    Type: String
+    Description: GWLBE Subnet in AZ1
+  SecurityVPCGWLBESubnetAZ2:
+    Type: String
+    Description: GWLBE Subnet in AZ2
+  SecurityVPCVMSeriesDataSubnetAZ1:
+    Type: String 
+    Description: VMSeries Subnet in AZ1 
+  SecurityVPCVMSeriesDataSubnetAZ2:
+    Type: String
+    Description: VMSeries Subnet in AZ2
+  SecurityVPCTGWRouteTableAZ1:
+    Type: String
+    Description: TGW Route Table AZ1
+  SecurityVPCTGWRouteTableAZ2:
+    Type: String
+    Description: TGW Route Table AZ2
+  SecurityVPCNATGWRouteTableAZ1:
+    Type: String 
+    Description: NAT GW Route Table AZ1
+  SecurityVPCNATGWRouteTableAZ2:
+    Type: String
+    Description: NAT GW Route Table AZ2
+  SecurityVPCAttachment:
+    Type: String
+    Description: TGW Attachment for SecurityVPC
+
+  VPC1: 
+    Type: String
+    Description: VPC1 from VPC Stack
+  VPC1FirewallSubnetA:
+    Type: String
+    Description: Firewall Subnet A From VPC1
+  VPC1FirewallSubnetB:
+    Type: String
+    Description: Firewall Subnet B From VPC1
+  VPC1PublicSubnetA: 
+    Type: String
+    Description: Public Subnet A in VPC1
+  VPC1PublicSubnetB: 
+    Type: String 
+    Description: Public Subnet B in VPC1
+  VPC1InternetGateway: 
+    Type: String
+    Description: Internet Gateway for VPC1
+  VPC1PublicSubnetARouteTable: 
+    Type: String
+    Description: VPC1 Public Subnet A Route Table 
+  VPC1PublicSubnetBRouteTable: 
+    Type: String
+    Description: VPC1 Public Subnet B Route Table
+
+  # VPCInstanceProfile: 
+  #   Type: String
+  #   Description: 'Instance Profile for VPCs'
+  # WebInstanceProfile:
+  #   Type: String
+  #   Description: 'Instance profile resource ID'
+
+
+# ======================================================================================================================
+#   Resources
+# ======================================================================================================================
+
+Resources: 
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   GWLB Base Deployment
+# ----------------------------------------------------------------------------------------------------------------------
+
+  GatewayLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties: 
+      Name: !Sub "${GlobalStackName}-gwlb-firewall"
+      Type: gateway
+      IpAddressType: ipv4
+      LoadBalancerAttributes:
+        - Key: load_balancing.cross_zone.enabled
+          Value: true
+      Subnets: 
+        - !Ref SecurityVPCVMSeriesDataSubnetAZ1
+        - !Ref SecurityVPCVMSeriesDataSubnetAZ2
+      Tags:
+        - Key: Name
+          Value: !Sub "${GlobalStackName}-gwlb-firewall"
+    
+  GWLBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${GlobalStackName}-gwlb-tg"
+      Port: 6081
+      Protocol: GENEVE
+      HealthCheckPort: 22
+      HealthCheckProtocol: TCP
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: 20
+      VpcId: !Ref SecurityVPC
+      TargetType: instance
+      Tags:
+        - Key: Name
+          Value: !Sub "${GlobalStackName}-gwlb-tg"
+
+  GWLBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref GWLBTargetGroup
+      LoadBalancerArn: !Ref GatewayLoadBalancer
+    
+# ----------------------------------------------------------------------------------------------------------------------
+#   Deployment of Endpoints
+# ----------------------------------------------------------------------------------------------------------------------
+
+  GWLBEndpointService: 
+    Type: AWS::EC2::VPCEndpointService
+    Properties: 
+      AcceptanceRequired: false 
+      GatewayLoadBalancerArns:
+        - !Ref GatewayLoadBalancer
+
+  SecurityVPCGWLBEndpoint1a:
+    Type: AWS::EC2::VPCEndpoint
+    DependsOn: 'GWLBEndpointService'
+    Properties:
+      VpcId: !Ref SecurityVPC
+      ServiceName: !Sub 'com.amazonaws.vpce.${AWS::Region}.${GWLBEndpointService}'
+      VpcEndpointType: GatewayLoadBalancer
+      SubnetIds:
+        - !Ref SecurityVPCGWLBESubnetAZ1
+
+  SecurityVPCGWLBEndpoint1b:
+    Type: AWS::EC2::VPCEndpoint
+    DependsOn: 'GWLBEndpointService'
+    Properties:
+      VpcId: !Ref SecurityVPC
+      ServiceName: !Sub 'com.amazonaws.vpce.${AWS::Region}.${GWLBEndpointService}'
+      VpcEndpointType: GatewayLoadBalancer
+      SubnetIds:
+        - !Ref SecurityVPCGWLBESubnetAZ2
+
+  VPC1GWLBEndpoint1a:
+    Type: AWS::EC2::VPCEndpoint
+    DependsOn: 'GWLBEndpointService'
+    Properties:
+      VpcId: !Ref VPC1
+      ServiceName: !Sub 'com.amazonaws.vpce.${AWS::Region}.${GWLBEndpointService}'
+      VpcEndpointType: GatewayLoadBalancer
+      SubnetIds:
+        - !Ref VPC1FirewallSubnetA
+
+  VPC1GWLBEndpoint1b:
+    Type: AWS::EC2::VPCEndpoint
+    DependsOn: 'GWLBEndpointService'
+    Properties:
+      VpcId: !Ref VPC1
+      ServiceName: !Sub 'com.amazonaws.vpce.${AWS::Region}.${GWLBEndpointService}'
+      VpcEndpointType: GatewayLoadBalancer
+      SubnetIds:
+        - !Ref VPC1FirewallSubnetB
+
+#Have to describe VPC Endpoint Services with a Lambda Function:
+#https://github.com/aws-samples/aws-gateway-load-balancer-suricata-ids-ips-nsm/blob/main/cloudformation/suricata/cluster.yaml
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   Configuration of Routing Tables 
+# ----------------------------------------------------------------------------------------------------------------------
+
+  #Security VPC Routes
+
+  SecurityVPCTGWSubnetAZ1RoutetoGWLBE: 
+    Type: AWS::EC2::Route
+    DependsOn: SecurityVPCGWLBEndpoint1a
+    Properties:
+      RouteTableId: !Ref SecurityVPCTGWRouteTableAZ1
+      DestinationCidrBlock: 0.0.0.0/0
+      VpcEndpointId: !Ref SecurityVPCGWLBEndpoint1a
+
+  SecurityVPCTGWSubnetAZ2RoutetoGWLBE: 
+    Type: AWS::EC2::Route
+    DependsOn: SecurityVPCGWLBEndpoint1b
+    Properties:
+      RouteTableId: !Ref SecurityVPCTGWRouteTableAZ2
+      DestinationCidrBlock: 0.0.0.0/0
+      VpcEndpointId: !Ref SecurityVPCGWLBEndpoint1b
+
+  SecurityVPCNATGWSubnetAZ1RoutetoGWLBE: 
+    Type: AWS::EC2::Route
+    DependsOn: SecurityVPCGWLBEndpoint1a
+    Properties:
+      RouteTableId: !Ref SecurityVPCNATGWRouteTableAZ1
+      DestinationCidrBlock: 10.0.0.0/8
+      VpcEndpointId: !Ref SecurityVPCGWLBEndpoint1a
+  
+  SecurityVPCNATGWSubnetAZ2RoutetoGWLBE: 
+    Type: AWS::EC2::Route
+    DependsOn: SecurityVPCGWLBEndpoint1b
+    Properties:
+      RouteTableId: !Ref SecurityVPCNATGWRouteTableAZ2
+      DestinationCidrBlock: 10.0.0.0/8
+      VpcEndpointId: !Ref SecurityVPCGWLBEndpoint1b
+
+  #VPC1 - Creating Ingress Route Table for IGW
+  VPC1IGWRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC1
+      Tags:
+        - Key : Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'VPC1-Edge-RT']]
+
+  VPC1IGWRouteTableAssociation:
+    Type: AWS::EC2::GatewayRouteTableAssociation
+    Properties: 
+      GatewayId: !Ref VPC1InternetGateway
+      RouteTableId: !Ref VPC1IGWRouteTable
+  
+
+  #VPC1 Routes
+
+  # Default template already has 0.0.0.0/0 route going to IGW, this needs to be changed manually. 
+
+  # Only use the below commands to update VPC1 Routes if you are not using the Lambda Function
+
+  # ------------------------------------------------------------------------------
+
+  # VPC1PublicSubnetAtoGWLBE:
+  #   Type: AWS::EC2::Route
+  #   DependsOn: VPC1GWLBEndpoint1a
+  #   Properties:
+  #     RouteTableId: !Ref VPC1PublicSubnetARouteTable
+  #     DestinationCidrBlock: 0.0.0.0/0
+  #     VpcEndpointId: !Ref VPC1GWLBEndpoint1a
+
+  # VPC1PublicSubnetBtoGWLBE:
+  #   Type: AWS::EC2::Route
+  #   DependsOn: VPC1GWLBEndpoint1b
+  #   Properties:
+  #     RouteTableId: !Ref VPC1PublicSubnetBRouteTable
+  #     DestinationCidrBlock: 0.0.0.0/0
+  #     VpcEndpointId: !Ref VPC1GWLBEndpoint1b
+
+  # ------------------------------------------------------------------------------
+
+  VPC1EdgeRTIngressRouteAZ1:
+    Type: AWS::EC2::Route
+    DependsOn: 
+      - VPC1GWLBEndpoint1a
+      - VPC1IGWRouteTable
+    Properties:
+      RouteTableId: !Ref VPC1IGWRouteTable
+      DestinationCidrBlock: 10.1.0.0/24
+      VpcEndpointId: !Ref VPC1GWLBEndpoint1a
+
+  VPC1EdgeRTIngressRouteAZ2:
+    Type: AWS::EC2::Route
+    DependsOn: 
+      - VPC1GWLBEndpoint1b
+      - VPC1IGWRouteTable
+    Properties:
+      RouteTableId: !Ref VPC1IGWRouteTable
+      DestinationCidrBlock: 10.1.1.0/24
+      VpcEndpointId: !Ref VPC1GWLBEndpoint1b
+
+  # # Custom Resource Lambda Function to Delete Old Routes and Add new ones
+
+  VPCLambdaRouteUpdaterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${GlobalStackName}-Route-Update-Role
+      Tags:
+        - Key: Name
+          Value: !Sub ${GlobalStackName}-Route-Update-Role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: !Sub ${GlobalStackName}-Route-Update-Policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement: 
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+              - Effect: Allow
+                Action:
+                  - ec2:CreateRoute
+                  - ec2:DeleteRoute
+                  - ec2:CreateRouteTable
+                  - ec2:ReplaceRoute
+                  - ec2:DeleteRouteTable
+                  - ec2:ModifyTransitGatewayVpcAttachment
+                Resource: "*"
+
+
+  VPCLambdaRouteUpdaterLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+        LogGroupName: !Sub /aws/lambda/${GlobalStackName}-VPC-Lambda-Route-Updater-Logs
+        RetentionInDays: 7
+
+  VPCLambdaRouteUpdater:
+    Type: AWS::Lambda::Function
+    DependsOn: 
+      - VPCLambdaRouteUpdaterLogGroup
+      - VPCLambdaRouteUpdaterRole
+    Properties:
+      FunctionName: !Sub ${GlobalStackName}-Lambda-VPC-Route-Updater
+      Handler: "index.handler"
+      Role: !GetAtt VPCLambdaRouteUpdaterRole.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub ${GlobalStackName}-Lambda-VPC-Route-Updater
+      Environment:
+        Variables:
+          VPC1PublicSubnetARouteTable: !Ref VPC1PublicSubnetARouteTable
+          VPC1PublicSubnetBRouteTable: !Ref VPC1PublicSubnetBRouteTable
+          VPC1GWLBEndpoint1a: !Ref VPC1GWLBEndpoint1a
+          VPC1GWLBEndpoint1b: !Ref VPC1GWLBEndpoint1b
+          SecurityVPCAttachment: !Ref SecurityVPCAttachment
+      Code:
+        ZipFile: |
+          import os
+          import json
+          import boto3
+          import logging
+          from botocore.exceptions import ClientError
+          import cfnresponse
+          import time
+
+          def handler(event, context):
+              
+              route_table_id_A = os.environ['VPC1PublicSubnetARouteTable']
+              route_table_id_B = os.environ['VPC1PublicSubnetBRouteTable']
+              
+              vpcEndpoint_A = os.environ['VPC1GWLBEndpoint1a']
+              vpcEndpoint_B = os.environ['VPC1GWLBEndpoint1b']
+
+              attachment_id = os.environ['SecurityVPCAttachment']
+              
+              Destination_00 = "0.0.0.0/0"
+              
+              ec2 = boto3.resource('ec2')
+              
+              routeA = ec2.Route(route_table_id_A, Destination_00)
+              routeB = ec2.Route(route_table_id_B, Destination_00)
+              
+              route_table_A = ec2.RouteTable(route_table_id_A)
+              route_table_B = ec2.RouteTable(route_table_id_B)
+              
+              responseStatus = ""
+              response = []
+              responseTGW = []
+              
+              #Create Route Table Entries
+              if event["RequestType"] == "Create":
+
+                #Delete Route Table Routes
+                try: 
+                    response = routeA.delete()
+                except ClientError as e:
+                    print('Check if routes have been deleted in Public Route Table A.')
+                    logging.error(e)   
+                try:
+                    response = routeB.delete()
+                except ClientError as e:
+                    print('Check if routes have been deleted in Public Route Table B.')
+                    logging.error(e)
+                        
+                #Add routes to VPC1 pointing to GWLB Endpoints
+                try: 
+                    routeA = route_table_A.create_route(
+                        DestinationCidrBlock=Destination_00,
+                        VpcEndpointId=vpcEndpoint_A
+                    )
+                    responseStatus = cfnresponse.SUCCESS 
+                except ClientError as e:
+                    print('Check if routes have been added to GWLB endpoint A.')
+                    responseStatus = cfnresponse.FAILED
+                    logging.error(e)
+                try: 
+                    routeB = route_table_B.create_route(
+                        DestinationCidrBlock=Destination_00,
+                        VpcEndpointId=vpcEndpoint_B
+                    )
+                    responseStatus = cfnresponse.SUCCESS
+                except ClientError as e:
+                    print('Check if routes have been added to GWLB endpoint B.')
+                    responseStatus = cfnresponse.FAILED
+                    logging.error(e)
+
+                response['output'] = ' Create event.'
+
+                # Initialize the Boto3 Transit Gateway client
+                client = boto3.client('ec2')
+                try:
+                    responseTGW = client.modify_transit_gateway_vpc_attachment(
+                        TransitGatewayAttachmentId=attachment_id,
+                        Options={
+                            'ApplianceModeSupport': 'enable'
+                        }
+                    )
+                    responseStatus = cfnresponse.SUCCESS
+                except Exception as e:
+                    print(f"Failed to enable Appliance Mode: {str(e)}")
+                    responseStatus = cfnresponse.FAILED
+
+              #Delete Route Table Routes
+              if event['RequestType'] == 'Delete':
+
+                try: 
+                    response = routeA.delete()
+                    responseStatus = cfnresponse.SUCCESS
+                except ClientError as e:
+                    print('Check if routes have been deleted in Public Route Table A.')
+                    logging.error(e)
+                    responseStatus = cfnresponse.FAILED
+                    
+                try:
+                    response = routeB.delete()
+                    responseStatus = cfnresponse.SUCCESS
+                except ClientError as e:
+                    print('Check if routes have been deleted in Public Route Table B.')
+                    responseStatus = cfnresponse.FAILED
+                    logging.error(e)
+
+                response['output'] = ' Delete event.'
+
+                # Initialize the Boto3 Transit Gateway client
+                client = boto3.client('ec2')
+                try:
+                    responseTGW = client.modify_transit_gateway_vpc_attachment(
+                        TransitGatewayAttachmentId=attachment_id,
+                        Options={
+                            'ApplianceModeSupport': 'disable'
+                        }
+                    )
+                    responseStatus = cfnresponse.SUCCESS
+                except Exception as e:
+                    print(f"Failed to enable Appliance Mode: {str(e)}")
+                    responseStatus = cfnresponse.FAILED
+
+              time.sleep(60)
+              cfnresponse.send(event, context, responseStatus, response)
+              
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps('Updated VPC1 Routes')
+              }
+      Runtime: python3.9
+      Timeout: 150
+      MemorySize: 1024
+
+  #Trigger used to deploy the VPC Lambda Route Updater function
+
+  TriggertoUpdateRoutes:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn: 
+      - VPCLambdaRouteUpdater
+      - VPCLambdaRouteUpdaterRole
+      - VPC1GWLBEndpoint1a
+      - VPC1GWLBEndpoint1b
+    Properties:
+      ServiceToken: !GetAtt VPCLambdaRouteUpdater.Arn
+
+  # TO DO
+
+  # Need to Add function to replace original routes when Cloudformation Template is deleted.
+
+  # VPCLambdaRouteDelete:
+  #   Type: AWS::Lambda::Function
+  #   Properties:
+  #     FunctionName: !Sub ${GlobalStackName}-Lambda-VPC-Route-Delete
+  #     Handler: "index.handler"
+  #     Role: !GetAtt VPCLambdaRouteUpdaterRole.Arn
+  #     Environment:
+  #       Variables:
+  #         VPC1PublicSubnetARouteTable: !Ref VPC1PublicSubnetARouteTable
+  #         VPC1PublicSubnetBRouteTable: !Ref VPC1PublicSubnetBRouteTable
+  #         VPC1GWLBEndpoint1a: !Ref VPC1GWLBEndpoint1a
+  #         VPC1GWLBEndpoint1b: !Ref VPC1GWLBEndpoint1b
+  #     Code:
+  #       ZipFile: |
+  #         import os
+  #         import logging
+  #         import boto3
+  #         from botocore.exceptions import ClientError
+  #         import cfnresponse
+  #         import time
+            
+  #         def lambda_handler(event, context):
+  #             route_table_id_A = os.environ['VPC1PublicSubnetARouteTable']
+  #             route_table_id_B = os.environ['VPC1PublicSubnetBRouteTable']
+              
+  #             vpcEndpoint_A = os.environ['VPC1GWLBEndpoint1a']
+  #             vpcEndpoint_B = os.environ['VPC1GWLBEndpoint1b']
+              
+  #             Destination_00 = "0.0.0.0/0"
+              
+  #             ec2 = boto3.resource('ec2')
+              
+  #             routeA = ec2.Route(route_table_id_A, Destination_00)
+  #             routeB = ec2.Route(route_table_id_B, Destination_00)
+
+  #             responseStatus = ""
+  #             response = {}
+
+#               if event['RequestType'] == 'Delete':
+
+#                 #Delete Route Table Routes
+#                 try: 
+#                     response = routeA.delete()
+#                     responseStatus = cfnresponse.SUCCESS
+#                 except ClientError as e:
+#                     print('Check if routes have been deleted in Public Route Table A.')
+#                     logging.error(e)
+#                     responseStatus = cfnresponse.FAILED
+                    
+#                 try:
+#                     response = routeB.delete()
+#                     responseStatus = cfnresponse.SUCCESS
+#                 except ClientError as e:
+#                     print('Check if routes have been deleted in Public Route Table B.')
+#                     responseStatus = cfnresponse.FAILED
+#                     logging.error(e)
+
+#                 response['output'] = ' Delete event.'
+
+  #             time.sleep(60)
+  #             cfnresponse.send(event, context, responseStatus, response)
+  #     Runtime: python3.9
+  #     Timeout: 150
+  #     MemorySize: 1024
+
+  # TriggertoDeleteRoutes:
+  #   Type: AWS::CloudFormation::CustomResource
+  #   DependsOn: 
+  #     - VPCLambdaRouteUpdater
+  #     - VPCLambdaRouteUpdaterRole
+  #     - VPC1GWLBEndpoint1a
+  #     - VPC1GWLBEndpoint1b
+  #     - VPCLambdaRouteDelete
+  #   Properties:
+  #     ServiceToken: !GetAtt VPCLambdaRouteDelete.Arn
+
+
+
+Outputs:
+
+  GWLBTargetGroupARN:
+    Description: 'GWLB targetgroup ARN'
+    Value: !Ref GWLBTargetGroup
+    Export:
+      Name: GWLBTargetGroupARN  

@@ -1,0 +1,616 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  Main CloudFormation Template used in order to deploy key parts for the Gateway Load Balancer Lab.
+  This template needs te be deployed first, and all nested templates need to be uploaded to an S3 bucket.
+  Ensure the files are uploaded to the bucket in the way they sit in the current folder. 
+
+# ======================================================================================================================
+#   Parameters
+# ======================================================================================================================
+
+Parameters:
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   VPC Stack Parameters
+# ----------------------------------------------------------------------------------------------------------------------
+
+  #Defining the environment type, must be copied to every single template
+  EnvironmentType:
+    Description: 'Specify the Environment type for the stack.'
+    Type: String
+    Default: Infrastructure-Only
+    AllowedValues:
+      - Infrastructure-Only
+      - Infrastructure+GWLB
+      - Fortinet
+      - Fortinet+GWLB
+      - PaloAlto
+      - PaloAlto+GWLB
+      #- OpenSource-Python
+      #- OpenSource-Python+GWLB
+      - OpenSource-Suricata
+      - OpenSource-Suricata+GWLB
+    ConstraintDescription: 'Specify either Infrastructure-Only, Fortinet, PaloAlto or OpenSource.'
+  #Navigate to conditions to see flow
+
+  #Desired Stack Name
+  GlobalStackName:
+    Description: Stackname that you would like to uniquely identify your resources.
+    Type: String
+    Default: gwlblab
+
+  #GWLB Lab BootStrap Bucket
+  GWLBLabS3BootstrapBucket:
+    AllowedPattern: ^[0-9a-zA-Z]+([0-9a-zA-Z-.]*[0-9a-zA-Z])*$
+    ConstraintDescription: Bucket name can include numbers, lowercase letters, uppercase letters, periods (.), and hyphens (-). It cannot start or end with a hyphen (-).
+    Description: This bucket is where you will upload all the Cloudformation and 3rd Party appliance Bootstraps in order to automate the deployment form the GWLB Lab Workshop.
+    Type: String
+    Default: youruserame-gwlblab-deployment-bucket
+
+# For Apps
+  VPC1CIDR:
+    Type: String
+    Description: Provide a/16 CIDR space, ideally you can leave it as default setting. Please keep this in the range of 10.0.0.0/8.
+    Default: 10.1.0.0/16
+    AllowedValues:
+      - "10.0.0.0/16"
+      - "10.1.0.0/16"
+      - "10.2.0.0/16"
+      - "10.3.0.0/16"
+      - "10.4.0.0/16"
+      - "10.64.0.0/16"
+      - "10.65.0.0/16"
+      - "10.66.0.0/16"
+      - "10.67.0.0/16"
+  VPC2CIDR:
+    Type: String
+    Description: Provide a/16 CIDR space, ideally you can leave it as default setting. Please keep this in the range of 10.0.0.0/8.
+    Default: 10.2.0.0/16
+    AllowedValues:
+      - "10.0.0.0/16"
+      - "10.1.0.0/16"
+      - "10.2.0.0/16"
+      - "10.3.0.0/16"
+      - "10.4.0.0/16"
+      - "10.64.0.0/16"
+      - "10.65.0.0/16"
+      - "10.66.0.0/16"
+      - "10.67.0.0/16"
+  SecurityVPCCIDR:
+    Type: String
+    Description: Provide a/16 CIDR space, ideally you can leave it as default setting. Please keep this in the range of 10.0.0.0/8.
+    Default: 10.0.0.0/16
+    AllowedValues:
+      - "10.0.0.0/16"
+      - "10.1.0.0/16"
+      - "10.2.0.0/16"
+      - "10.3.0.0/16"
+      - "10.4.0.0/16"
+      - "10.64.0.0/16"
+      - "10.65.0.0/16"
+      - "10.66.0.0/16"
+      - "10.67.0.0/16"
+
+  # ASN For TGW
+  TGWRegionalASN:
+    Type: String
+    Description: Provide BGP ASN for TGW. (no need to change unless you are extending this lab)
+    Default: 65000
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   EC2 Parameters
+# ----------------------------------------------------------------------------------------------------------------------
+
+  #EC2 key pair for the deployment
+  EC2KeyPair:
+    Description: >-
+      AWS EC2 Instance Key Pair for authentication to the VM-Series Firewalls.
+    Type: AWS::EC2::KeyPair::KeyName
+    AllowedPattern: .+
+    ConstraintDescription: Must set an EC2 Key Pair for VM-Series
+
+  #Management Network CIDR
+  RemoteManagementCIDR:
+    Description: >-
+      Remote Management CIDR to be allowed management access to VM-Series Firewalls (e.g. 192.168.0.0/25)
+    Type: String
+    Default: 0.0.0.0/0
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})
+    ConstraintDescription: Must be a valid CIDR (e.g. 0.0.0.0/0)
+
+#Palo Alto Parameters
+  PaloAltoInstanceType:
+    Description: >-
+      More information follow this link: https://docs.paloaltonetworks.com/vm-series/10-0/vm-series-performance-capacity/vm-series-performance-capacity/vm-series-on-aws-models-and-instances.html
+      Leave as the default setting if you are not deploying a Palo Alto instance.
+    Type: String
+    AllowedValues:
+      - m3.xlarge
+      - m3.2xlarge
+      - m4.xlarge
+      - m4.2xlarge
+      - m4.4xlarge
+      - m5.large
+      - m5.xlarge
+      - m5.2xlarge
+      - m5.4xlarge
+      - m5.12xlarge
+      - m5.24xlarge
+      - m5n.large
+      - m5n.xlarge
+      - m5n.2xlarge
+      - m5n.4xlarge
+      - m5n.8xlarge
+      - c3.xlarge
+      - c3.2xlarge
+      - c3.4xlarge
+      - c3.8xlarge
+      - c4.xlarge
+      - c4.2xlarge
+      - c4.4xlarge
+      - c4.8xlarge
+      - c5.xlarge
+      - c5.2xlarge
+      - c5.4xlarge
+      - c5.9xlarge
+      - c5.18xlarge
+      - c5n.xlarge
+      - c5n.2xlarge
+      - c5n.4xlarge
+      - c5n.9xlarge
+      - c5n.18xlarge
+    Default: c5.xlarge
+
+  PaloAltoAMI:
+    Description: >-
+      AMI reference in the format 'ami-00000000000' for PAN-OS 10.2.3 or above. Default AMI is the North Virginia region.
+    Type: String
+    Default: ami-05dc03bf3caae5344
+    # Old Default AMI for Palo Alto PAN-OS v10.0.2 = ami-0f8c3e2c1b7b4bcc9 
+    AllowedPattern: ami-\w{1,30}
+    ConstraintDescription: Must be a valid AMI (e.g. ami-0a00a3780ec15f108)
+
+  #Fortinet Parameters
+  FortinetInstanceType:
+    Description: >-
+      More information follow this link: 
+      Leave as the default setting if you are not deploying a Fortinet instance.
+    Type: String
+    AllowedValues:
+      - t3.small
+      - t3.xlarge
+      - c4.large
+      - c4.xlarge
+      - c4.2xlarge
+      - c4.4xlarge
+      - c4.8xlarge
+      - c5.large
+      - c5.xlarge
+      - c5.2xlarge
+      - c5.4xlarge
+      - c5.9xlarge
+      - c5.18xlarge
+      - c5n.xlarge
+      - c5n.2xlarge
+      - c5n.4xlarge
+      - c5n.9xlarge
+      - c5n.18xlarge
+    Default: c5.large
+
+  FortinetAMI:
+    Description: >-
+      Deploys Fortinet 7.2.0 in certain regions. Default region is N. Virginia, check Fortinet Workshop page for which regions are supported.
+    Type: String
+    Default: ami-035a7ca1d22b2ac60
+    AllowedPattern: ami-\w{1,30}
+    ConstraintDescription: Must be a valid AMI (e.g. ami-0a00a3780ec15f108)
+
+#   #Open Source Parameters
+#   OpenSourceInstanceType:
+#     Description: >-
+#       As this is an open source instance, it is mainly recommended to be in the M or C family classes.
+#       Leave as the default setting if you are not deploying a Open Source instance.
+#     Type: String
+#     AllowedValues:
+#       - m3.xlarge
+#       - m3.2xlarge
+#       - m4.xlarge
+#       - m4.2xlarge
+#       - m4.4xlarge
+#       - m5.large
+#       - m5.xlarge
+#       - m5.2xlarge
+#       - m5.4xlarge
+#       - m5.12xlarge
+#       - m5.24xlarge
+#       - m5n.large
+#       - m5n.xlarge
+#       - m5n.2xlarge
+#       - m5n.4xlarge
+#       - m5n.8xlarge
+#       - c3.xlarge
+#       - c3.2xlarge
+#       - c3.4xlarge
+#       - c3.8xlarge
+#       - c4.xlarge
+#       - c4.2xlarge
+#       - c4.4xlarge
+#       - c4.8xlarge
+#       - c5.xlarge
+#       - c5.2xlarge
+#       - c5.4xlarge
+#       - c5.9xlarge
+#       - c5.18xlarge
+#       - c5n.xlarge
+#       - c5n.2xlarge
+#       - c5n.4xlarge
+#       - c5n.9xlarge
+#       - c5n.18xlarge
+#     Default: m5.large
+
+#   OpenSourceAMI:
+#     Description: >-
+#       AMI reference in the format 'ami-00000000000' for PAN-OS v10.0.2 or above.
+#     Type: String
+#     Default: ami-0022f774911c1d690
+#     AllowedPattern: ami-\w{1,30}
+#     ConstraintDescription: Must be a valid AMI (e.g. ami-0a00a3780ec15f108)
+  
+
+
+
+
+# ======================================================================================================================
+#   Metadata - Ordering of Parameters
+# ======================================================================================================================
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label: 
+          default: "Environment Configuration"
+        Parameters: 
+          - GlobalStackName
+          - EnvironmentType
+          - GWLBLabS3BootstrapBucket
+      -
+        Label:
+          default: "Required Changes"
+        Parameters:
+          - EC2KeyPair
+          - RemoteManagementCIDR
+      -
+        Label:
+          default: "VPC CIDRs"
+        Parameters:
+          - SecurityVPCCIDR
+          - VPC1CIDR
+          - VPC2CIDR
+      -
+        Label:
+          default: "Palo Alto Instance Configuration - Don't touch unless you have selected EnvironmentType: PaloAlto"
+        Parameters:
+          - PaloAltoInstanceType
+          - PaloAltoAMI
+      -
+        Label: 
+          default: "Fortinet Instance Configuration - Don't touch unless you have selected EnvironmentType: Fortinet"
+        Parameters: 
+          - FortinetInstanceType
+          - FortinetAMI
+
+
+    #Name Used on the headers of the CloudFormation Template
+    ParameterLabels:
+      GWLBLabS3BootstrapBucket:
+        default: "S3 Bootstrap Bucket Name:"
+      EnvironmentType:
+        default: "Environment Type:"
+      GlobalStackName:
+        default: "Global Stack Name:"
+      EC2KeyPair: 
+        default: "EC2 Key Pair:"
+      RemoteManagementCIDR: 
+        default: "Remote Management CIDR Range:"
+      SecurityVPCCIDR: 
+        default: "Security VPC CIDR Range:"
+      VPC1CIDR: 
+        default: "VPC1 CIDR Range: "
+      VPC2CIDR: 
+        default: "VPC2 CIDR Range: "
+      FortinetInstanceType: 
+        default: "Fortinet Instance Type: "
+      FortinetAMI: 
+        default: "Fortinet AMI: "
+      PaloAltoInstanceType:
+        default: "Palo Alto Instance Type: "
+      PaloAltoAMI:
+        default: "Palo Alto AMI: "
+      TGWRegionalASN: 
+        default: "Default TGW ASN Number: "
+      
+
+# ======================================================================================================================
+#   Conditions
+# ======================================================================================================================
+
+Conditions:
+
+  # Creates GWLB Resources depending on any individual selection 
+  CreateGWLBResources: !Or 
+    - !Equals [!Ref EnvironmentType, Infrastructure+GWLB]
+    - !Equals [!Ref EnvironmentType, Fortinet+GWLB]
+    - !Equals [!Ref EnvironmentType, PaloAlto+GWLB]
+    - !Equals [!Ref EnvironmentType, OpenSource-Python+GWLB]
+    - !Equals [!Ref EnvironmentType, OpenSource-Suricata+GWLB]
+
+  #Creates necessary resources for the dependent stack the user chooses. 
+  CreateFortinetResources: !Or 
+    - !Equals [!Ref EnvironmentType, Fortinet]
+    - !Equals [!Ref EnvironmentType, Fortinet+GWLB]
+
+  CreatePaloAltoResources: !Or 
+    - !Equals [!Ref EnvironmentType, PaloAlto]
+    - !Equals [!Ref EnvironmentType, PaloAlto+GWLB]
+
+  CreateOpenSourcePythonResources: !Or 
+    - !Equals [!Ref EnvironmentType, OpenSource-Python]
+    - !Equals [!Ref EnvironmentType, OpenSource-Python+GWLB]
+
+  CreateOpenSourceSuricataResources: !Or 
+    - !Equals [!Ref EnvironmentType, OpenSource-Suricata]
+    - !Equals [!Ref EnvironmentType, OpenSource-Suricata+GWLB]
+  
+
+# ======================================================================================================================
+#   Resources
+# ======================================================================================================================
+
+Resources: 
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   IAM Stack - Launches necessary IAM Roles
+# ----------------------------------------------------------------------------------------------------------------------
+
+  IAMStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${GWLBLabS3BootstrapBucket}.s3.amazonaws.com/cloudformation/gwlblab-iam.yaml
+      TimeoutInMinutes: 10
+      Parameters: 
+        GlobalStackName: !Ref GlobalStackName
+        GWLBLabS3BootstrapBucket: !Ref GWLBLabS3BootstrapBucket
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   VPC Stack - Launches VPCs, TGWs and Endpoints with an SGs
+# ----------------------------------------------------------------------------------------------------------------------
+
+  VPCStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: 
+      - IAMStack
+    Properties:
+      TemplateURL: !Sub https://${GWLBLabS3BootstrapBucket}.s3.amazonaws.com/cloudformation/gwlblab-vpc.yaml
+      TimeoutInMinutes: 10
+      Parameters:
+        GlobalStackName: !Ref GlobalStackName 
+        VPC1CIDR: !Ref VPC1CIDR
+        VPC2CIDR: !Ref VPC2CIDR
+        SecurityVPCCIDR: !Ref SecurityVPCCIDR
+        TGWRegionalASN: !Ref TGWRegionalASN
+        RemoteManagementCIDR: !Ref RemoteManagementCIDR
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   EC2 Stack - Launches EC2 instances, NLBs and SGs
+# ----------------------------------------------------------------------------------------------------------------------
+
+  EC2Stack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: 
+      - IAMStack
+      - VPCStack
+    Properties:
+      TemplateURL: !Sub https://${GWLBLabS3BootstrapBucket}.s3.amazonaws.com/cloudformation/gwlblab-ec2.yaml
+      TimeoutInMinutes: 10
+      Parameters:
+        GlobalStackName: !Ref GlobalStackName 
+        VPC1CIDR: !Ref VPC1CIDR
+        VPC1: !GetAtt VPCStack.Outputs.VPC1
+        VPC1PrivateSubnetA: !GetAtt VPCStack.Outputs.VPC1PrivateSubnetA
+        VPC1PrivateSubnetB: !GetAtt VPCStack.Outputs.VPC1PrivateSubnetB
+        VPC1PublicSubnetA: !GetAtt VPCStack.Outputs.VPC1PublicSubnetA
+        VPC1PublicSubnetB: !GetAtt VPCStack.Outputs.VPC1PublicSubnetB
+        VPC2CIDR: !Ref VPC2CIDR
+        VPC2: !GetAtt VPCStack.Outputs.VPC2
+        VPC2PrivateSubnetA: !GetAtt VPCStack.Outputs.VPC2PrivateSubnetA
+        VPC2PrivateSubnetB: !GetAtt VPCStack.Outputs.VPC2PrivateSubnetB
+        VPC2PublicSubnetA: !GetAtt VPCStack.Outputs.VPC1PublicSubnetA
+        VPC2PublicSubnetB: !GetAtt VPCStack.Outputs.VPC1PublicSubnetB
+        SecurityVPCCIDR: !Ref SecurityVPCCIDR
+        VPCInstanceProfile: !GetAtt IAMStack.Outputs.VPCInstanceProfile
+        WebInstanceProfile: !GetAtt IAMStack.Outputs.WebInstanceProfile
+        RemoteManagementCIDR: !Ref RemoteManagementCIDR
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   GWLB Stack - Launches the GWLB Configuration with Endpoints, Route Tables and Target Groups
+# ----------------------------------------------------------------------------------------------------------------------
+
+  GWLBStack: 
+    Type: AWS::CloudFormation::Stack
+    DependsOn: 
+      - IAMStack
+      - VPCStack
+      - EC2Stack
+    Condition: CreateGWLBResources
+    Properties:
+      TemplateURL: !Sub https://${GWLBLabS3BootstrapBucket}.s3.amazonaws.com/cloudformation/gwlblab-gwlb-deployment.yaml
+      TimeoutInMinutes: 10
+      Parameters: 
+        GlobalStackName: !Ref GlobalStackName 
+        GWLBLabS3BootstrapBucket: !Ref GWLBLabS3BootstrapBucket
+        SecurityVPC: !GetAtt VPCStack.Outputs.SecurityVPC
+        SecurityVPCCIDR: !Ref SecurityVPCCIDR
+        SecurityVPCVMSeriesDataSubnetAZ1: !GetAtt VPCStack.Outputs.SecurityVPCVMSeriesDataSubnetAZ1
+        SecurityVPCVMSeriesDataSubnetAZ2: !GetAtt VPCStack.Outputs.SecurityVPCVMSeriesDataSubnetAZ2
+        SecurityVPCGWLBESubnetAZ1: !GetAtt VPCStack.Outputs.SecurityVPCGWLBESubnetAZ1
+        SecurityVPCGWLBESubnetAZ2: !GetAtt VPCStack.Outputs.SecurityVPCGWLBESubnetAZ2
+        SecurityVPCTGWRouteTableAZ1: !GetAtt VPCStack.Outputs.SecurityVPCTGWRouteTableAZ1
+        SecurityVPCTGWRouteTableAZ2: !GetAtt VPCStack.Outputs.SecurityVPCTGWRouteTableAZ2
+        SecurityVPCNATGWRouteTableAZ1: !GetAtt VPCStack.Outputs.SecurityVPCNATGWRouteTableAZ1
+        SecurityVPCNATGWRouteTableAZ2: !GetAtt VPCStack.Outputs.SecurityVPCNATGWRouteTableAZ2
+        VPC1: !GetAtt VPCStack.Outputs.VPC1
+        VPC1FirewallSubnetA: !GetAtt VPCStack.Outputs.VPC1FirewallSubnetA
+        VPC1FirewallSubnetB: !GetAtt VPCStack.Outputs.VPC1FirewallSubnetB
+        VPC1PublicSubnetA: !GetAtt VPCStack.Outputs.VPC1PublicSubnetA
+        VPC1PublicSubnetB: !GetAtt VPCStack.Outputs.VPC1PublicSubnetB
+        VPC1InternetGateway: !GetAtt VPCStack.Outputs.VPC1InternetGateway
+        VPC1PublicSubnetARouteTable: !GetAtt VPCStack.Outputs.VPC1PublicSubnetARouteTable
+        VPC1PublicSubnetBRouteTable: !GetAtt VPCStack.Outputs.VPC1PublicSubnetBRouteTable
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   Fortinet Stack - Deploys Fortinet configuration
+# ----------------------------------------------------------------------------------------------------------------------
+
+  FortinetStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: 
+      - IAMStack
+      - VPCStack
+    Condition: CreateFortinetResources #Must be set for Fortinet/Palo/Opensource options
+    Properties:
+      TemplateURL: !Sub https://${GWLBLabS3BootstrapBucket}.s3.amazonaws.com/fortinet-config/ASG-CF/templates/autoscale-main.template.yaml
+      TimeoutInMinutes: 10
+      Parameters:
+        ResourceTagPrefix: !Ref GlobalStackName 
+        S3BucketName: !Ref GWLBLabS3BootstrapBucket
+        S3KeyPrefix: 'fortinet-config/ASG-CF/'
+        UniqueId: !Select
+                    - 0
+                    - !Split
+                      - '-'
+                      - !Select
+                        - 2
+                        - !Split
+                          - /
+                          - !Ref 'AWS::StackId'
+        VpcId: !GetAtt VPCStack.Outputs.SecurityVPC
+        VpcCidr: !Ref SecurityVPCCIDR
+        VpcEndpointId: ''
+        PublicSubnet1: !GetAtt VPCStack.Outputs.SecurityVPCNATGWSubnetAZ1
+        PublicSubnet2: !GetAtt VPCStack.Outputs.SecurityVPCNATGWSubnetAZ2
+        PrivateSubnet1: !GetAtt VPCStack.Outputs.SecurityVPCVMSeriesDataSubnetAZ1
+        PrivateSubnet2: !GetAtt VPCStack.Outputs.SecurityVPCVMSeriesDataSubnetAZ2
+        PrivateSubnetRouteTable: ''
+        GWLBTargetGroupARNs: !GetAtt GWLBStack.Outputs.GWLBTargetGroupARN
+        FortiGateInstanceType: !Ref FortinetInstanceType
+        FortiOSVersion: 703
+        LifecycleHookTimeout: 480
+        FgtAsgCooldown: 300
+        FgtAsgDesiredCapacityByol: 0
+        FgtAsgMinSizeByol: 0
+        FgtAsgMaxSizeByol: 0
+        FgtAsgDesiredCapacityPayg: 2
+        FgtAsgMinSizePayg: 2
+        FgtAsgMaxSizePayg: 6
+        FgtAsgHealthCheckGracePeriod: 300
+        FgtAsgScaleInThreshold: 25
+        FgtAsgScaleOutThreshold: 80
+        FortiGatePskSecret: "Create and store in Secret Manager"
+        FortiGateAdminPort: 443
+        FortiGateAdminCidr: !Ref RemoteManagementCIDR
+        KeyPairName: !Ref EC2KeyPair
+        PrimaryElectionTimeout: 300
+        HeartBeatInterval: 30
+        HeartBeatLossCount: 10
+        HeartBeatDelayAllowance: 2
+        LoadBalancingTrafficProtocol: HTTPS
+        LoadBalancingTrafficPort: 443
+        LoadBalancingHealthCheckThreshold: 3
+        FortiAnalyzerIntegrationOptions: 'no'
+        FortiAnalyzerInstanceType: ''
+        FortiAnalyzerVersion: 6.4.7
+        FortiAnalyzerAutoscaleAdminUsername: ''
+        FortiAnalyzerAutoscaleAdminPassword: 'notneeded'
+        FortiAnalyzerCustomPrivateIpAddress: ''
+        AutoscaleNotificationSubscriberEmail: empty@example.com
+        TerminateUnhealthyVm: 'no'
+        SyncRecoveryCount: 3
+
+
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   PaloAlto Stack - Deploys PaloAlto configuration
+# ----------------------------------------------------------------------------------------------------------------------
+
+  PaloAltoStack:
+      Type: AWS::CloudFormation::Stack
+      DependsOn: 
+        - IAMStack
+        - VPCStack
+      Condition: CreatePaloAltoResources #Must be set for Fortinet/Palo/Opensource options
+      Properties:
+        TemplateURL: !Sub https://${GWLBLabS3BootstrapBucket}.s3.amazonaws.com/cloudformation/gwlblab-paloalto.yaml
+        TimeoutInMinutes: 10
+        Parameters:
+          GlobalStackName: !Ref GlobalStackName 
+          GWLBLabS3BootstrapBucket: !Ref GWLBLabS3BootstrapBucket
+          PaloAltoInstanceType: !Ref PaloAltoInstanceType
+          PaloAltoAMI: !Ref PaloAltoAMI
+          SecurityVPC: !GetAtt VPCStack.Outputs.SecurityVPC
+          SecurityVPCCIDR: !Ref SecurityVPCCIDR
+          SecurityVPCVMSeriesManagementSecurityGroup: !GetAtt VPCStack.Outputs.SecurityVPCVMSeriesManagementSecurityGroup
+          SecurityVPCVMSeriesDataSecurityGroup: !GetAtt VPCStack.Outputs.SecurityVPCVMSeriesDataSecurityGroup
+          SecurityVPCVMSeriesDataSubnetAZ1: !GetAtt VPCStack.Outputs.SecurityVPCVMSeriesDataSubnetAZ1
+          SecurityVPCVMSeriesDataSubnetAZ2: !GetAtt VPCStack.Outputs.SecurityVPCVMSeriesDataSubnetAZ2
+          SecurityVPCNATGWSubnetAZ1: !GetAtt VPCStack.Outputs.SecurityVPCNATGWSubnetAZ1
+          SecurityVPCNATGWSubnetAZ2: !GetAtt VPCStack.Outputs.SecurityVPCNATGWSubnetAZ2
+          #TGWRegionalASN: !Ref TGWRegionalASN
+          RemoteManagementCIDR: !Ref RemoteManagementCIDR
+          VMSeriesInstanceProfile: !GetAtt IAMStack.Outputs.VMSeriesInstanceProfile
+          EC2KeyPair: !Ref EC2KeyPair
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   OpenSource Python Stack - Deploys OpenSource configuration
+# ----------------------------------------------------------------------------------------------------------------------
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   OpenSource Suricata Stack - Deploys OpenSource configuration
+# ----------------------------------------------------------------------------------------------------------------------
+
+  SuricataStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: 
+      - IAMStack
+      - VPCStack
+    Condition: CreateOpenSourceSuricataResources #Must be set for Fortinet/Palo/Opensource options
+    Properties:
+      TemplateURL: !Sub https://${GWLBLabS3BootstrapBucket}.s3.amazonaws.com/cloudformation/gwlblab-opensource-suricata.yaml
+      TimeoutInMinutes: 10
+      Parameters:
+        GlobalStackName: !Ref GlobalStackName 
+        #GWLBLabS3BootstrapBucket: !Ref GWLBLabS3BootstrapBucket
+        #SecurityVPC: !GetAtt VPCStack.Outputs.SecurityVPC
+        SecurityVPCCIDR: !Ref SecurityVPCCIDR
+        SecurityVPCVMSeriesManagementSecurityGroup: !GetAtt VPCStack.Outputs.SecurityVPCVMSeriesManagementSecurityGroup
+        SecurityVPCVMSeriesDataSecurityGroup: !GetAtt VPCStack.Outputs.SecurityVPCVMSeriesDataSecurityGroup
+        SecurityVPCVMSeriesDataSubnetAZ1: !GetAtt VPCStack.Outputs.SecurityVPCVMSeriesDataSubnetAZ1
+        SecurityVPCVMSeriesDataSubnetAZ2: !GetAtt VPCStack.Outputs.SecurityVPCVMSeriesDataSubnetAZ2
+        SecurityVPCNATGWSubnetAZ1: !GetAtt VPCStack.Outputs.SecurityVPCNATGWSubnetAZ1
+        SecurityVPCNATGWSubnetAZ2: !GetAtt VPCStack.Outputs.SecurityVPCNATGWSubnetAZ2
+        RemoteManagementCIDR: !Ref RemoteManagementCIDR
+        VMSeriesInstanceProfile: !GetAtt IAMStack.Outputs.VMSeriesInstanceProfile
+        EC2KeyPair: !Ref EC2KeyPair
+
+# ======================================================================================================================
+#   Outputs
+# ======================================================================================================================
+
+#Outputs:
+
+
+

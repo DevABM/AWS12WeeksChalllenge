@@ -1,0 +1,208 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  EC2 Deployment for the Suricata Stack.
+
+# ======================================================================================================================
+#   Parameters
+# ======================================================================================================================
+
+Parameters:
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   Passed Pramaters from Main Stack
+# ----------------------------------------------------------------------------------------------------------------------
+
+  #Desired Stack Name
+  GlobalStackName:
+    Description: Stackname that you would like to uniquely identify your resources.
+    Type: String
+
+  #Amazon EC2 Latest Parameter ID
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+    
+  #Security VPC Parameters
+  # SecurityVPC: 
+  #   Type: AWS::EC2::VPC::Id
+  #   Description: 'The VPC ID'
+  SecurityVPCCIDR:
+    Type: String
+    Description: Provide a/16 CIDR space.
+  SecurityVPCVMSeriesDataSubnetAZ1: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID of the Data Subnet in AZ1'
+  SecurityVPCVMSeriesDataSubnetAZ2: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID of the Data Subnet in AZ2'
+  SecurityVPCNATGWSubnetAZ1: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'Security VPC NAT Gateway Subnet in AZ1'
+  SecurityVPCNATGWSubnetAZ2: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'Security VPC NAT Gateway Subnet in AZ2'
+  SecurityVPCVMSeriesManagementSecurityGroup: 
+    Type: String
+    Description: 'Security Group for Management interfaces on VMSeries Instances'
+  SecurityVPCVMSeriesDataSecurityGroup: 
+    Type: String
+    Description: 'Security Group for Data Interfaces on VMSeries Instances'
+
+  #IAM Role
+  VMSeriesInstanceProfile: 
+    Type: String
+    Description: 'Instance Profile for VPCs'
+
+  #Management Network CIDR
+  RemoteManagementCIDR:
+    Description: >-
+      Remote Management CIDR to be allowed management access to VM-Series Firewall (e.g. 192.168.0.0/25)
+    Type: String
+
+  #EC2 key pair for the deployment
+  EC2KeyPair:
+    Description: >-
+      AWS EC2 Instance Key Pair for authentication to the VM-Series Firewalls.
+    Type: AWS::EC2::KeyPair::KeyName
+
+# ======================================================================================================================
+#   Resources
+# ======================================================================================================================
+
+Resources:
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   Suricata 01
+# ----------------------------------------------------------------------------------------------------------------------
+
+  SuricataManagement01ENIAZ1:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: Suricata-Management-01-ENI
+      GroupSet: [ !Ref SecurityVPCVMSeriesManagementSecurityGroup ]
+      SubnetId: !Ref SecurityVPCNATGWSubnetAZ1
+      PrivateIpAddress: "10.0.6.55"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'Suricata-Management-01-AZ1'] ]
+
+  SuricataManagementEIPAZ1:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'Suricata-Management-01-AZ1'] ]
+
+  SuricataManagementEIPAssociationAZ1:
+    Type: AWS::EC2::EIPAssociation
+    DependsOn: SuricataManagementEIPAZ1
+    Properties:
+      AllocationId: !GetAtt SuricataManagementEIPAZ1.AllocationId
+      NetworkInterfaceId: !Ref SuricataManagement01ENIAZ1
+
+  SuricataData01ENIAZ1:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: Suricata-Data-01-AZ1
+      SourceDestCheck: No
+      GroupSet: [ !Ref SecurityVPCVMSeriesDataSecurityGroup ]
+      SubnetId: !Ref SecurityVPCVMSeriesDataSubnetAZ1
+      PrivateIpAddress: "10.0.4.55"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'Suricata-Data-01-AZ1'] ]
+
+  Suricata01EC2AZ1:
+    Type: AWS::EC2::Instance
+    DependsOn: 
+      - SuricataData01ENIAZ1
+      - SuricataManagementEIPAssociationAZ1
+      - SuricataManagementEIPAZ1
+      - SuricataManagement01ENIAZ1
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: t2.micro
+      KeyName: !Ref EC2KeyPair
+      IamInstanceProfile: !Ref VMSeriesInstanceProfile
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref SuricataData01ENIAZ1
+          DeviceIndex: '0'
+        - NetworkInterfaceId: !Ref SuricataManagement01ENIAZ1
+          DeviceIndex: '1'
+      Tags:
+        - Key: Name
+          Value: !Sub ${GlobalStackName}-Suricata-01-AZ1
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   Suricata 02
+# ----------------------------------------------------------------------------------------------------------------------
+
+  # SuricataManagement02ENIAZ2:
+  #   Type: AWS::EC2::NetworkInterface
+  #   Properties:
+  #     Description: Suricata-Management-02-ENI
+  #     GroupSet: [ !Ref SecurityVPCVMSeriesManagementSecurityGroup ]
+  #     SubnetId: !Ref SecurityVPCNATGWSubnetAZ2
+  #     PrivateIpAddress: "10.0.7.55"
+  #     Tags:
+  #       - Key: Name
+  #         Value: !Join [ '-' , [ !Ref "GlobalStackName", 'Suricata-Management-02-AZ2'] ]
+
+  # SuricataManagementEIPAZ2:
+  #   Type: AWS::EC2::EIP
+  #   Properties:
+  #     Domain: vpc
+  #     Tags:
+  #       - Key: Name
+  #         Value: !Join [ '-' , [ !Ref "GlobalStackName", 'Suricata-Management-02-AZ2'] ]
+
+  # SuricataManagementEIPAssociationAZ2:
+  #   Type: AWS::EC2::EIPAssociation
+  #   DependsOn: SuricataManagementEIPAZ2
+  #   Properties:
+  #     AllocationId: !GetAtt SuricataManagementEIPAZ2.AllocationId
+  #     NetworkInterfaceId: !Ref SuricataManagement02ENIAZ2
+
+  # SuricataData02ENIAZ2:
+  #   Type: AWS::EC2::NetworkInterface
+  #   Properties:
+  #     Description: Suricata-Data-02-AZ2
+  #     SourceDestCheck: No
+  #     GroupSet: [ !Ref SecurityVPCVMSeriesDataSecurityGroup ]
+  #     SubnetId: !Ref SecurityVPCVMSeriesDataSubnetAZ2
+  #     PrivateIpAddress: "10.0.5.55"
+  #     Tags:
+  #       - Key: Name
+  #         Value: !Join [ '-' , [ !Ref "GlobalStackName", 'Suricata-Data-02-AZ2'] ]
+
+  # Suricata02EC2AZ2:
+  #   Type: AWS::EC2::Instance
+  #   DependsOn: 
+  #     - SuricataData02ENIAZ2
+  #     - SuricataManagementEIPAssociationAZ2
+  #     - SuricataManagementEIPAZ2
+  #     - SuricataManagement02ENIAZ2
+  #   Properties:
+  #     ImageId: !Ref LatestAmiId
+  #     InstanceType: t2.micro
+  #     KeyName: !Ref EC2KeyPair
+  #     IamInstanceProfile: !Ref VMSeriesInstanceProfile
+  #     NetworkInterfaces:
+  #       - NetworkInterfaceId: !Ref SuricataManagement02ENIAZ2
+  #         DeviceIndex: '0'
+  #       - NetworkInterfaceId: !Ref SuricataData02ENIAZ2
+  #         DeviceIndex: '1'
+  #     Tags:
+  #       - Key: Name
+  #         Value: !Sub ${GlobalStackName}-Suricata-02-AZ2
+
+
+
+# ======================================================================================================================
+#   Outputs
+# ======================================================================================================================
+
+#Outputs:

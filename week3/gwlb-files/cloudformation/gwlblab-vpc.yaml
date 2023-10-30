@@ -1,0 +1,1460 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  Deploys the necessary VPCs, NLBs, EC2 instances and Security Groups for the GWLB Workshop. 
+
+# ======================================================================================================================
+#   Parameters
+# ======================================================================================================================
+
+Parameters:
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   Passed Pramaters from Main Stack
+# ----------------------------------------------------------------------------------------------------------------------
+
+  # Desired Stack Name
+  GlobalStackName:
+    Description: Stackname that you would like to uniquely identify your resources.
+    Type: String
+  # Condition For CiscoSubnets
+  EnvironmentType:
+    Description: 'Specify the Environment type for the stack.'
+    Type: String
+  # For Apps
+  VPC1CIDR:
+    Type: String
+    Description: Provide a/16 CIDR space.
+  VPC2CIDR:
+    Type: String
+    Description: Provide a/16 CIDR space.
+  SecurityVPCCIDR:
+    Type: String
+    Description: Provide a/16 CIDR space.
+
+  # Management Network CIDR
+  RemoteManagementCIDR:
+    Description: >-
+      Remote Management CIDR to be allowed management access to VM-Series Firewall (e.g. 192.168.0.0/25)
+    Type: String
+
+  # ASN For TGW
+  TGWRegionalASN:
+    Type: String
+    Description: Provide BGP ASN for TGW. (no need to change unless you are extending this lab)
+
+# ======================================================================================================================
+#   Conditions
+# ======================================================================================================================
+
+Conditions:
+
+
+  CreateCiscoResources: !Or 
+    - !Equals [!Ref EnvironmentType, CiscoFirewallThreatDefense]
+    - !Equals [!Ref EnvironmentType, CiscoFirewallThreatDefense+GWLB]
+
+# ======================================================================================================================
+#   Resources
+# ======================================================================================================================
+
+Resources: 
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   VPC1
+# ----------------------------------------------------------------------------------------------------------------------
+
+  VPC1:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPC1CIDR
+      EnableDnsSupport: "true"
+      EnableDnsHostnames: "true"
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC1"
+        - Key: project
+          Value: gwlblab
+
+  # VPC1 Private Subnets
+  VPC1PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC1
+      CidrBlock: !Select [2, !Cidr [!GetAtt VPC1.CidrBlock, 6, 8]]
+      AvailabilityZone:
+        !Select [ 0, !GetAZs  '' ]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "Private-Subnet-A"
+  VPC1PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC1
+      CidrBlock: !Select [3, !Cidr [!GetAtt VPC1.CidrBlock, 6, 8]]
+      AvailabilityZone:
+        !Select [ 1, !GetAZs  '' ]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "Private-Subnet-B"
+
+  # VPC1 Private Subnet Route Table
+  VPC1PrivateSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC1
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "Private-Route-Table"
+  
+  VPC1PrivateASubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPC1PrivateSubnetRouteTable
+      SubnetId:
+        Ref: VPC1PrivateSubnetA
+  VPC1PrivateBSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPC1PrivateSubnetRouteTable
+      SubnetId:
+        Ref: VPC1PrivateSubnetB
+
+  # VPC1 Private Subnet Route Table - VPC1 Routes
+  VPC1NATInternetRoutePrivate:
+    Type: AWS::EC2::Route
+    DependsOn: 
+      - VPC1InternetGateway
+      - VPC1PrivateSubnetRouteTable
+      - VPC1PrivateSubnetA
+      - VPC1PrivateSubnetB
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: VPC1NATGateway
+      RouteTableId:
+        Ref: VPC1PrivateSubnetRouteTable
+  VPC1ClassTGWRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref VPC1PrivateSubnetRouteTable
+      DestinationCidrBlock: 10.0.0.0/8
+      TransitGatewayId: !Ref GWLBLabTGW
+    DependsOn: 
+      - VPC1Attachment
+      - GWLBLabTGW
+
+  # VPC1 Public Subnets
+  VPC1PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC1
+      CidrBlock: !Select [0, !Cidr [!GetAtt VPC1.CidrBlock, 6, 8]]
+      AvailabilityZone:
+        !Select [ 0, !GetAZs  '' ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "Public-Subnet-A"
+
+  VPC1PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC1
+      CidrBlock: !Select [1, !Cidr [!GetAtt VPC1.CidrBlock, 6, 8]]
+      AvailabilityZone:
+        !Select [ 1, !GetAZs  '' ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "Public-Subnet-B"
+
+  # VPC1 Public Route Table
+  VPC1PublicSubnetARouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC1
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "Public-A-Route-Table"
+  VPC1PublicSubnetBRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC1
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "Public-B-Route-Table"
+
+  VPC1PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPC1PublicSubnetARouteTable
+      SubnetId:
+        Ref: VPC1PublicSubnetA
+  VPC1PublicSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPC1PublicSubnetBRouteTable
+      SubnetId:
+        Ref: VPC1PublicSubnetB
+  
+  # VPC1 Public Route table Routes
+  VPC1DirectInternetRouteA:
+    Type: AWS::EC2::Route
+    DependsOn: 
+      - VPC1InternetGateway
+      - VPC1PublicSubnetARouteTable
+      - VPC1PublicSubnetA
+      - VPC1PublicSubnetARouteTableAssociation
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: VPC1InternetGateway
+      RouteTableId:
+        Ref: VPC1PublicSubnetARouteTable
+  VPC1DirectInternetRouteB:
+    Type: AWS::EC2::Route
+    DependsOn: 
+      - VPC1InternetGateway
+      - VPC1PublicSubnetBRouteTable
+      - VPC1PublicSubnetB
+      - VPC1PublicSubnetBRouteTableAssociation
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: VPC1InternetGateway
+      RouteTableId:
+        Ref: VPC1PublicSubnetBRouteTable
+
+  # VPC1 IGW
+  VPC1InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "IGW"
+  VPC1AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC1
+      InternetGatewayId:
+        Ref: VPC1InternetGateway
+
+  # VPC1 Nat Gateway
+  VPC1NATEIP:
+    Type: "AWS::EC2::EIP"
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'NATGW-VPC1']]
+
+  VPC1NATGateway:
+    DependsOn: VPC1AttachGateway
+    Type: "AWS::EC2::NatGateway"
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+          - VPC1NATEIP
+          - AllocationId
+      SubnetId:
+        Ref: VPC1PublicSubnetA
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "NAT-Gateway"
+
+  # Firewall Subnets
+  VPC1FirewallSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC1
+      CidrBlock: !Select [4, !Cidr [!GetAtt VPC1.CidrBlock, 6, 8]]
+      AvailabilityZone:
+        !Select [ 0, !GetAZs  '' ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "Firewall-Subnet-A"
+
+  VPC1FirewallSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC1
+      CidrBlock: !Select [5, !Cidr [!GetAtt VPC1.CidrBlock, 6, 8]]
+      AvailabilityZone:
+        !Select [ 1, !GetAZs  '' ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "Firewall-Subnet-B"
+
+  # Firewall Route Table
+  VPC1FirewallSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC1
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC1"
+              - "-"
+              - "Firewall-Route-Table"
+
+  VPC1FirewallASubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPC1FirewallSubnetRouteTable
+      SubnetId:
+        Ref: VPC1FirewallSubnetA
+  VPC1FirewallBSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPC1FirewallSubnetRouteTable
+      SubnetId:
+        Ref: VPC1FirewallSubnetB  
+
+  # Firewall Route Table - Routes
+  VPC1FirewallInternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPC1InternetGateway
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: VPC1InternetGateway
+      RouteTableId:
+        Ref: VPC1FirewallSubnetRouteTable
+
+  # Interface Endpoint Security Group
+  VPC1InterfaceEndpointSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: All open ports for Interface Endpoints
+      GroupName: !Join
+        - ""
+        - - Ref: "GlobalStackName"
+          - "-"
+          - "VPC1"
+          - "-"
+          - "Interface-Endpoints-SG"
+      VpcId:
+        Ref: VPC1
+      SecurityGroupIngress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'Interface-Endpoints-SG'] ]
+
+  # SSM Endpoints - Tagging not supported with Cloudformation and Interface/Gateway Endpoints
+  VPC1SSMEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssm'
+      VpcId: !Ref VPC1
+      SubnetIds: 
+        - !Ref VPC1PrivateSubnetA
+        - !Ref VPC1PrivateSubnetB
+      SecurityGroupIds:
+        - !Ref VPC1InterfaceEndpointSecGroup
+      PrivateDnsEnabled: True
+
+  VPC1SSMMessagesEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssmmessages'
+      VpcId: !Ref VPC1
+      SubnetIds: 
+        - !Ref VPC1PrivateSubnetA
+        - !Ref VPC1PrivateSubnetB
+      SecurityGroupIds:
+        - !Ref VPC1InterfaceEndpointSecGroup
+      PrivateDnsEnabled: True
+
+  VPC1S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Gateway
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcId: !Ref VPC1
+      RouteTableIds: 
+        - !Ref VPC1PublicSubnetARouteTable
+        - !Ref VPC1PublicSubnetBRouteTable
+        - !Ref VPC1PrivateSubnetRouteTable
+        - !Ref VPC1FirewallSubnetRouteTable
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   VPC2
+# ----------------------------------------------------------------------------------------------------------------------
+
+  VPC2:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPC2CIDR
+      EnableDnsSupport: "true"
+      EnableDnsHostnames: "true"
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC2"
+        - Key: project
+          Value: gwlblab
+
+  # VPC2 Private Subnets
+  VPC2PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC2
+      CidrBlock: !Select [2, !Cidr [!GetAtt VPC2.CidrBlock, 6, 8]]
+      AvailabilityZone:
+        !Select [ 0, !GetAZs  '' ]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC2"
+              - "-"
+              - "Private-Subnet-A"
+  VPC2PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC2
+      CidrBlock: !Select [3, !Cidr [!GetAtt VPC2.CidrBlock, 6, 8]]
+      AvailabilityZone:
+        !Select [ 1, !GetAZs  '' ]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC2"
+              - "-"
+              - "Private-Subnet-B"
+
+  # VPC2 Private Subnet Route Table
+  VPC2PrivateSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC2
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC2"
+              - "-"
+              - "Private-Route-Table"
+  
+  VPC2PrivateASubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPC2PrivateSubnetRouteTable
+      SubnetId:
+        Ref: VPC2PrivateSubnetA
+  VPC2PrivateBSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPC2PrivateSubnetRouteTable
+      SubnetId:
+        Ref: VPC2PrivateSubnetB
+
+  # VPC2 Private Subnet Route Table - Route 0.0.0.0/0 to TGW
+  VPC2TGWInternetRoutePrivate:
+    Type: AWS::EC2::Route
+    DependsOn: VPC2Attachment
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      TransitGatewayId:
+        Ref: GWLBLabTGW
+      RouteTableId:
+        Ref: VPC2PrivateSubnetRouteTable
+
+  # VPC2 Public Subnets
+  VPC2PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC2
+      CidrBlock: !Select [0, !Cidr [!GetAtt VPC2.CidrBlock, 6, 8]]
+      AvailabilityZone:
+        !Select [ 0, !GetAZs  '' ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC2"
+              - "-"
+              - "Public-Subnet-A"
+
+  VPC2PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC2
+      CidrBlock: !Select [1, !Cidr [!GetAtt VPC2.CidrBlock, 6, 8]]
+      AvailabilityZone:
+        !Select [ 1, !GetAZs  '' ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC2"
+              - "-"
+              - "Public-Subnet-B"
+
+  # VPC2 Public Route Table
+  VPC2PublicSubnetARouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC2
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC2"
+              - "-"
+              - "Public-A-Route-Table"
+  VPC2PublicSubnetBRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC2
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC2"
+              - "-"
+              - "Public-B-Route-Table"
+
+  VPC2PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPC2PublicSubnetARouteTable
+      SubnetId:
+        Ref: VPC2PublicSubnetA
+  VPC2PublicSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: VPC2PublicSubnetBRouteTable
+      SubnetId:
+        Ref: VPC2PublicSubnetB
+  
+  # VPC2 IGW
+  VPC2InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC2"
+              - "-"
+              - "IGW"
+  VPC2AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC2
+      InternetGatewayId:
+        Ref: VPC2InternetGateway
+  
+  
+  # VPC2 Public Route table Routes
+  VPC2DirectInternetRouteA:
+    Type: AWS::EC2::Route
+    DependsOn: 
+      - VPC2InternetGateway
+      - VPC2PublicSubnetARouteTable
+      - VPC2PublicSubnetA
+      - VPC2PublicSubnetARouteTableAssociation
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: VPC2InternetGateway
+      RouteTableId:
+        Ref: VPC2PublicSubnetARouteTable
+  VPC2DirectInternetRouteB:
+    Type: AWS::EC2::Route
+    DependsOn: 
+      - VPC2InternetGateway
+      - VPC2PublicSubnetARouteTable
+      - VPC2PublicSubnetB
+      - VPC2PublicSubnetBRouteTableAssociation
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: VPC2InternetGateway
+      RouteTableId:
+        Ref: VPC2PublicSubnetBRouteTable
+
+  # Interface Endpoint Security Group
+  VPC2InterfaceEndpointSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: All open ports for Interface Endpoints
+      GroupName: !Join
+        - ""
+        - - Ref: "GlobalStackName"
+          - "-"
+          - "VPC2"
+          - "-"
+          - "Interface-Endpoints-SG"
+      VpcId:
+        Ref: VPC2
+      SecurityGroupIngress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'Interface-Endpoints-SG'] ]
+
+  # SSM Endpoints - Tagging not supported with Cloudformation and Interface/Gateway Endpoints
+  VPC2SSMEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssm'
+      VpcId: !Ref VPC2
+      SubnetIds: 
+        - !Ref VPC2PrivateSubnetA
+        - !Ref VPC2PrivateSubnetB
+      SecurityGroupIds:
+        - !Ref VPC2InterfaceEndpointSecGroup
+      PrivateDnsEnabled: True
+
+  VPC2SSMMessagesEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssmmessages'
+      VpcId: !Ref VPC2
+      SubnetIds: 
+        - !Ref VPC2PrivateSubnetA
+        - !Ref VPC2PrivateSubnetB
+      SecurityGroupIds:
+        - !Ref VPC2InterfaceEndpointSecGroup
+      PrivateDnsEnabled: True
+
+  VPC2S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Gateway
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcId: !Ref VPC2
+      RouteTableIds: 
+        - !Ref VPC2PublicSubnetARouteTable
+        - !Ref VPC2PublicSubnetBRouteTable
+        - !Ref VPC2PrivateSubnetRouteTable
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   Security / Firewall VPC
+# ----------------------------------------------------------------------------------------------------------------------
+
+  SecurityVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref SecurityVPCCIDR
+      EnableDnsSupport: "true"
+      EnableDnsHostnames: "true"
+      Tags:
+        - Key: Name
+          Value: !Join ['-', [!Ref "GlobalStackName", "SecurityVPC" ]]
+  SecurityIGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Join ['-', [!Ref "GlobalStackName", "SecurityVPC-IGW" ]]
+  SecurityIGWAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref SecurityIGW
+      VpcId: !Ref SecurityVPC
+
+  #Subnets
+  SecurityVPCTGWSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref SecurityVPC
+      CidrBlock: !Select [0, !Cidr [!GetAtt SecurityVPC.CidrBlock, 8, 8]]
+      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-TGW-AZ1']]
+  SecurityVPCTGWSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref SecurityVPC
+      CidrBlock: !Select [1, !Cidr [!GetAtt SecurityVPC.CidrBlock, 8, 8]]
+      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-TGW-AZ2']]
+  
+  SecurityVPCGWLBESubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref SecurityVPC
+      CidrBlock: !Select [2, !Cidr [!GetAtt SecurityVPC.CidrBlock, 8, 8]]
+      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-GWLBE-AZ1']]
+  SecurityVPCGWLBESubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref SecurityVPC
+      CidrBlock: !Select [3, !Cidr [!GetAtt SecurityVPC.CidrBlock, 8, 8]]
+      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-GWLBE-AZ2']]
+
+  SecurityVPCVMSeriesDataSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref SecurityVPC
+      CidrBlock: !Select [4, !Cidr [!GetAtt SecurityVPC.CidrBlock, 8, 8]]
+      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-Data-AZ1']]
+  SecurityVPCVMSeriesDataSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref SecurityVPC
+      CidrBlock: !Select [5, !Cidr [!GetAtt SecurityVPC.CidrBlock, 8, 8]]
+      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecuirtyVPC-Data-AZ2']]
+
+  # Security VPC Nat Gateway Subnets
+  SecurityVPCNATGWSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref SecurityVPC
+      CidrBlock: !Select [6, !Cidr [!GetAtt SecurityVPC.CidrBlock, 8, 8]]
+      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-NATGW-AZ1']]
+  SecurityVPCNATGWSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref SecurityVPC
+      CidrBlock: !Select [7, !Cidr [!GetAtt SecurityVPC.CidrBlock, 8, 8]]
+      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-NATGW-AZ2']]
+
+  # Route Table and Associations
+
+  # TGW Route Table AZ1
+  SecurityVPCTGWRouteTableAZ1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref SecurityVPC
+      Tags:
+        - Key : Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-TGW-AZ1']]
+  TGWRouteTableAssociationAZ1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref SecurityVPCTGWRouteTableAZ1
+      SubnetId: !Ref SecurityVPCTGWSubnetAZ1
+
+  #TGW Route Table AZ2
+  SecurityVPCTGWRouteTableAZ2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref SecurityVPC
+      Tags:
+        - Key : Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-TGW-AZ2']]
+  TGWRouteTableAssociationAZ2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref SecurityVPCTGWRouteTableAZ2
+      SubnetId: !Ref SecurityVPCTGWSubnetAZ2
+
+  #GWLBE Route Table AZ1
+  SecurityVPCGWLBERouteTableAZ1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref SecurityVPC
+      Tags:
+        - Key : Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-GWLBE-AZ1']]
+  SecurityVPCGWLBERouteTableAssociationAZ1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref SecurityVPCGWLBERouteTableAZ1
+      SubnetId: !Ref SecurityVPCGWLBESubnetAZ1
+  SecurityVPCGWLBEDefaultRouteAZ1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref SecurityVPCGWLBERouteTableAZ1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref SecurityVPCNATGWAZ1
+  SecurityVPCGWLBEClassARouteAZ1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref SecurityVPCGWLBERouteTableAZ1
+      DestinationCidrBlock: 10.0.0.0/8
+      TransitGatewayId: !Ref GWLBLabTGW
+    DependsOn: SecurityVPCAttachment
+
+  #GWLBE Route Table AZ2
+  SecurityVPCGWLBERouteTableAZ2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref SecurityVPC
+      Tags:
+        - Key : Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-GWLBE-AZ2']]
+  SecurityVPCGWLBERouteTableAssociationAZ2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref SecurityVPCGWLBERouteTableAZ2
+      SubnetId: !Ref SecurityVPCGWLBESubnetAZ2
+  SecurityVPCGWLBEDefaultRouteAZ2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref SecurityVPCGWLBERouteTableAZ2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref SecurityVPCNATGWAZ2
+  SecurityVPCGWLBEClassARouteAZ2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref SecurityVPCGWLBERouteTableAZ2
+      DestinationCidrBlock: 10.0.0.0/8
+      TransitGatewayId: !Ref GWLBLabTGW
+    DependsOn: SecurityVPCAttachment
+
+  # NAT Gateway Route Table AZ1
+  SecurityVPCNATGWRouteTableAZ1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref SecurityVPC
+      Tags:
+        - Key : Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-NATGW-AZ1']]
+  SecurityVPCNATGWRouteTableAssociationAZ1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref SecurityVPCNATGWRouteTableAZ1
+      SubnetId: !Ref SecurityVPCNATGWSubnetAZ1
+  SecurityVPCNATGWDefaultRouteAZ1:
+    Type: AWS::EC2::Route
+    DependsOn: SecurityIGW
+    Properties:
+      RouteTableId: !Ref SecurityVPCNATGWRouteTableAZ1
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref SecurityIGW
+
+  # NAT Gateway Route Table AZ2
+  SecurityVPCNATGWRouteTableAZ2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref SecurityVPC
+      Tags:
+        - Key : Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-NATGW-AZ2']]
+  SecurityVPCNATGWRouteTableAssociationAZ2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref SecurityVPCNATGWRouteTableAZ2
+      SubnetId: !Ref SecurityVPCNATGWSubnetAZ2
+  SecurityVPCNATGWDefaultRouteAZ2:
+    Type: AWS::EC2::Route
+    DependsOn: SecurityIGW
+    Properties:
+      RouteTableId: !Ref SecurityVPCNATGWRouteTableAZ2
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref SecurityIGW
+
+  #VM Series Data Route Table
+  SecurityVPCVMSeriesDataRouteTableAZ1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref SecurityVPC
+      Tags:
+        - Key : Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-Data-AZ1']]
+  SecurityVPCVMSeriesDataRouteTableAssociationAZ1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref SecurityVPCVMSeriesDataRouteTableAZ1
+      SubnetId: !Ref SecurityVPCVMSeriesDataSubnetAZ1
+
+  SecurityVPCVMSeriesDataRouteTableAZ2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref SecurityVPC
+      Tags:
+        - Key : Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-Data-AZ2']]
+  SecurityVPCVMSeriesDataRouteTableAssociationAZ2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref SecurityVPCVMSeriesDataRouteTableAZ2
+      SubnetId: !Ref SecurityVPCVMSeriesDataSubnetAZ2
+
+  # NAT Gateways
+  SecurityVPCNATGWEIPAZ1:
+    Type: AWS::EC2::EIP
+    DependsOn: SecurityIGWAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-NATGW-AZ1']]
+  SecurityVPCNATGWAZ1:
+    DependsOn: 
+      - SecurityVPCNATGWEIPAZ1
+      - SecurityVPCNATGWSubnetAZ1
+    Type: AWS::EC2::NatGateway
+    Properties:
+      SubnetId: !Ref SecurityVPCNATGWSubnetAZ1
+      AllocationId: !GetAtt SecurityVPCNATGWEIPAZ1.AllocationId
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-NATGW-AZ1']]
+  
+  SecurityVPCNATGWEIPAZ2:
+    Type: AWS::EC2::EIP
+    DependsOn: SecurityIGWAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-NATGW-AZ2']]
+  SecurityVPCNATGWAZ2:
+    Type: AWS::EC2::NatGateway
+    DependsOn:
+      - SecurityVPCNATGWEIPAZ2
+      - SecurityVPCNATGWSubnetAZ2
+    Properties:
+      SubnetId: !Ref SecurityVPCNATGWSubnetAZ2
+      AllocationId: !GetAtt SecurityVPCNATGWEIPAZ2.AllocationId
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-NATGW-AZ2']]
+
+  # Interface Endpoint Security Group
+  SecurityVPCInterfaceEndpointSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: All open ports for Interface Endpoints
+      GroupName: !Join
+        - ""
+        - - Ref: "GlobalStackName"
+          - "-"
+          - "SecurityVPC"
+          - "-"
+          - "Interface-Endpoints-SG"
+      VpcId:
+        Ref: SecurityVPC
+      SecurityGroupIngress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'Interface-Endpoints-SG'] ]
+
+  # Security VPC Endpoints
+
+  # SSM Endpoints - Tagging not supported with Cloudformation and Interface/Gateway Endpoints
+  SecurityVPCSSMEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssm'
+      VpcId: !Ref SecurityVPC
+      SubnetIds: 
+        - !Ref SecurityVPCVMSeriesDataSubnetAZ1
+        - !Ref SecurityVPCVMSeriesDataSubnetAZ2
+      SecurityGroupIds:
+        - !Ref SecurityVPCInterfaceEndpointSecGroup
+      PrivateDnsEnabled: True
+
+  SecurityVPCSSMMessagesEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssmmessages'
+      VpcId: !Ref SecurityVPC
+      SubnetIds: 
+        - !Ref SecurityVPCVMSeriesDataSubnetAZ1
+        - !Ref SecurityVPCVMSeriesDataSubnetAZ2
+      SecurityGroupIds:
+        - !Ref SecurityVPCInterfaceEndpointSecGroup
+      PrivateDnsEnabled: True
+  
+  SecurityVPCSS3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Gateway
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcId: !Ref SecurityVPC
+      RouteTableIds: 
+        - !Ref SecurityVPCTGWRouteTableAZ1
+        - !Ref SecurityVPCTGWRouteTableAZ2
+        - !Ref SecurityVPCGWLBERouteTableAZ1
+        - !Ref SecurityVPCGWLBERouteTableAZ2
+        - !Ref SecurityVPCNATGWRouteTableAZ1
+        - !Ref SecurityVPCNATGWRouteTableAZ2
+        - !Ref SecurityVPCVMSeriesDataRouteTableAZ1
+        - !Ref SecurityVPCVMSeriesDataRouteTableAZ2
+
+  # Security VPC Security Group
+
+  # Management Security Group for Management Interfaces, allowing access from internet
+  SecurityVPCVMSeriesManagementSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref SecurityVPC
+      GroupName: !Sub ${GlobalStackName}-VMSeries-Management
+      GroupDescription: VM-Series Management Security Group
+      SecurityGroupIngress:
+        - CidrIp: !Ref RemoteManagementCIDR
+          FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+        - CidrIp: !Ref RemoteManagementCIDR
+          FromPort: 80
+          ToPort: 80
+          IpProtocol: tcp
+        - CidrIp: !Ref RemoteManagementCIDR
+          FromPort: 8080
+          ToPort: 8080
+          IpProtocol: tcp
+        - CidrIp: !Ref RemoteManagementCIDR
+          FromPort: 443
+          ToPort: 443
+          IpProtocol: tcp
+        # Add additional inbound role to Management Security Group for Cisco FMC
+        - Description: Allow traffic between FMC management and FTD management interfaces
+          CidrIp: !Ref SecurityVPCCIDR
+          FromPort: 8305
+          ToPort: 8305
+          IpProtocol: tcp
+        - Description: Allow traffic from Lambda subnet to FMC
+          CidrIp: !GetAtt SecurityVPCNATGWSubnetAZ1.CidrBlock
+          FromPort: 443
+          ToPort: 443
+          IpProtocol: tcp
+        - CidrIp: 10.0.0.0/8
+          FromPort: 6081
+          ToPort: 6081
+          IpProtocol: udp
+        - CidrIp: 10.0.0.0/8
+          FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'VMSeries-Management'] ]
+
+  # Internal Interface Security Group
+  SecurityVPCVMSeriesDataSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref SecurityVPC
+      GroupName: !Sub ${GlobalStackName}-VMSeries-Data
+      GroupDescription: VM-Series Data Security Group
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: -1
+          ToPort: -1
+          IpProtocol: -1
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'VMSeries-Data'] ]
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   GWLB Transit Gateway
+# ----------------------------------------------------------------------------------------------------------------------
+
+  # Transit Gateway
+  GWLBLabTGW:
+    Type: "AWS::EC2::TransitGateway"
+    Properties:
+      AmazonSideAsn: !Ref "TGWRegionalASN"
+      AutoAcceptSharedAttachments: "enable"
+      DefaultRouteTableAssociation: "disable"
+      DefaultRouteTablePropagation: "disable"
+      DnsSupport: "enable"
+      VpnEcmpSupport: "enable"
+      Tags:
+        - Key: "Name"
+          Value: !Sub "${GlobalStackName}-TGW"
+
+  AppsVPCsRouteTable:
+    Type: "AWS::EC2::TransitGatewayRouteTable"
+    Properties:
+      TransitGatewayId: !Ref GWLBLabTGW
+      Tags:
+        - Key: "Name"
+          Value: !Sub "${GlobalStackName}-Apps"
+
+  SecurityVPCRouteTable:
+    Type: "AWS::EC2::TransitGatewayRouteTable"
+    Properties:
+      TransitGatewayId: !Ref GWLBLabTGW
+      Tags:
+        - Key: "Name"
+          Value: !Sub "${GlobalStackName}-Security"
+
+  # VPC Attachments to GWLBLabTGW
+  SecurityVPCAttachment:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties:
+      VpcId: !Ref SecurityVPC
+      SubnetIds: [!Ref SecurityVPCTGWSubnetAZ1,!Ref SecurityVPCTGWSubnetAZ2]
+      TransitGatewayId: !Ref GWLBLabTGW
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'SecurityVPC'] ]
+
+  VPC1Attachment:
+    Type: "AWS::EC2::TransitGatewayAttachment"
+    Properties:
+      VpcId: !Ref VPC1
+      TransitGatewayId: !Ref GWLBLabTGW
+      SubnetIds:
+        - !Ref VPC1PrivateSubnetA
+        - !Ref VPC1PrivateSubnetB
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC1"
+
+  VPC2Attachment:
+    Type: "AWS::EC2::TransitGatewayAttachment"
+    Properties:
+      VpcId: !Ref VPC2
+      TransitGatewayId: !Ref GWLBLabTGW
+      SubnetIds:
+        - !Ref VPC2PrivateSubnetA
+        - !Ref VPC2PrivateSubnetB
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ""
+            - - Ref: "GlobalStackName"
+              - "-"
+              - "VPC2"
+
+  # GWLBLab TGW Associations
+  VPC1Association:
+    Type: "AWS::EC2::TransitGatewayRouteTableAssociation"
+    Properties:
+      TransitGatewayRouteTableId: !Ref AppsVPCsRouteTable
+      TransitGatewayAttachmentId: !Ref VPC1Attachment
+  
+  VPC2Association:
+    Type: "AWS::EC2::TransitGatewayRouteTableAssociation"
+    Properties:
+      TransitGatewayRouteTableId: !Ref AppsVPCsRouteTable
+      TransitGatewayAttachmentId: !Ref VPC2Attachment
+
+  SecurityVPCAssociation:
+    Type: "AWS::EC2::TransitGatewayRouteTableAssociation"
+    Properties:
+      TransitGatewayRouteTableId: !Ref SecurityVPCRouteTable
+      TransitGatewayAttachmentId: !Ref SecurityVPCAttachment
+
+  # GWLBLab TGW Propagations
+  VPC1Propagation:
+    Type: "AWS::EC2::TransitGatewayRouteTablePropagation"
+    Properties:
+      TransitGatewayRouteTableId: !Ref SecurityVPCRouteTable
+      TransitGatewayAttachmentId: !Ref VPC1Attachment
+
+  VPC2Propagation:
+    Type: "AWS::EC2::TransitGatewayRouteTablePropagation"
+    Properties:
+      TransitGatewayRouteTableId: !Ref SecurityVPCRouteTable
+      TransitGatewayAttachmentId: !Ref VPC2Attachment
+
+  # GWLBLab Static Routes - 0.0.0.0/0 route to SecurityVPC
+  SecurityVPCAllTrafficRoute:
+    Type: AWS::EC2::TransitGatewayRoute
+    Properties:
+      DestinationCidrBlock: "0.0.0.0/0"
+      TransitGatewayAttachmentId: !Ref SecurityVPCAttachment
+      TransitGatewayRouteTableId: !Ref AppsVPCsRouteTable
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   Cisco Workflow Stack - Inside Subnets AZ1 & AZ2
+# ----------------------------------------------------------------------------------------------------------------------
+
+
+  #Subnets
+  SecurityVPCInsideSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Condition: CreateCiscoResources #Must be set for Fortinet/Palo/Opensource/Cisco options
+    Properties:
+      VpcId: !Ref SecurityVPC
+      CidrBlock: !Select [ 8, !Cidr [!GetAtt SecurityVPC.CidrBlock, 10, 8]]
+      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-Inside-AZ1']]
+  SecurityVPCInsideSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Condition: CreateCiscoResources #Must be set for Fortinet/Palo/Opensource/Cisco options
+    Properties:
+      VpcId: !Ref SecurityVPC
+      CidrBlock: !Select [ 9, !Cidr [!GetAtt SecurityVPC.CidrBlock, 10, 8]]
+      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
+      Tags:
+        - Key: Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-Inside-AZ2']]
+
+  # Route Table and Associations
+
+  # Inside Route Table AZ1 & AZ2
+  SecurityVPCInsideRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: CreateCiscoResources #Must be set for Fortinet/Palo/Opensource/Cisco options
+    Properties:
+      VpcId: !Ref SecurityVPC
+      Tags:
+        - Key : Name
+          Value: !Join ['-' , [!Ref "GlobalStackName", 'SecurityVPC-Inside']]
+
+  # Associate to Subnet Inside AZ1    
+  InsideRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: CreateCiscoResources #Must be set for Fortinet/Palo/Opensource/Cisco options
+    Properties:
+      RouteTableId: !Ref SecurityVPCInsideRouteTable
+      SubnetId: !Ref SecurityVPCInsideSubnetAZ1
+
+  # Associate to Subnet Inside AZ2
+  InsideRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: CreateCiscoResources #Must be set for Fortinet/Palo/Opensource/Cisco options
+    Properties:
+      RouteTableId: !Ref SecurityVPCInsideRouteTable
+      SubnetId: !Ref SecurityVPCInsideSubnetAZ2
+
+
+
+
+# ======================================================================================================================
+#   Outputs
+# ======================================================================================================================
+
+Outputs:
+
+  # VPC1 Exports
+  VPC1: 
+    Value: !Ref VPC1
+  VPC1PrivateSubnetA: 
+    Value: !Ref VPC1PrivateSubnetA
+  VPC1PrivateSubnetB: 
+    Value: !Ref VPC1PrivateSubnetB
+  VPC1PublicSubnetA: 
+    Value: !Ref VPC1PublicSubnetA
+  VPC1PublicSubnetB: 
+    Value: !Ref VPC1PublicSubnetB
+  VPC1FirewallSubnetA:
+    Value: !Ref VPC1FirewallSubnetA
+  VPC1FirewallSubnetB: 
+    Value: !Ref VPC1FirewallSubnetB
+  VPC1InternetGateway: 
+    Value: !Ref VPC1InternetGateway
+  VPC1PublicSubnetARouteTable:
+    Value: !Ref VPC1PublicSubnetARouteTable
+  VPC1PublicSubnetBRouteTable:
+    Value: !Ref VPC1PublicSubnetBRouteTable
+
+  # VPC 2 Exports
+  VPC2: 
+    Value: !Ref VPC2
+  VPC2PrivateSubnetA: 
+    Value: !Ref VPC2PrivateSubnetA
+  VPC2PrivateSubnetB: 
+    Value: !Ref VPC2PrivateSubnetB
+  VPC2PublicSubnetA: 
+    Value: !Ref VPC2PublicSubnetA
+  VPC2PublicSubnetB: 
+    Value: !Ref VPC2PublicSubnetB
+
+  # Security VPC Exports
+  SecurityVPC: 
+    Value: !Ref SecurityVPC
+  SecurityVPCVMSeriesDataSubnetAZ1: 
+    Value: !Ref SecurityVPCVMSeriesDataSubnetAZ1
+  SecurityVPCVMSeriesDataSubnetAZ2: 
+    Value: !Ref SecurityVPCVMSeriesDataSubnetAZ2
+  SecurityVPCGWLBESubnetAZ1:
+    Value: !Ref SecurityVPCGWLBESubnetAZ1
+  SecurityVPCGWLBESubnetAZ2: 
+    Value: !Ref SecurityVPCGWLBESubnetAZ2
+  SecurityVPCNATGWSubnetAZ1: 
+    Value: !Ref SecurityVPCNATGWSubnetAZ1
+  SecurityVPCNATGWSubnetAZ2: 
+    Value: !Ref SecurityVPCNATGWSubnetAZ2
+  SecurityVPCVMSeriesManagementSecurityGroup: 
+    Value: !Ref SecurityVPCVMSeriesManagementSecurityGroup
+  SecurityVPCVMSeriesDataSecurityGroup: 
+    Value: !Ref SecurityVPCVMSeriesDataSecurityGroup
+  SecurityVPCTGWRouteTableAZ1: 
+    Value: !Ref SecurityVPCTGWRouteTableAZ1
+  SecurityVPCTGWRouteTableAZ2: 
+    Value: !Ref SecurityVPCTGWRouteTableAZ2
+  SecurityVPCNATGWRouteTableAZ1: 
+    Value: !Ref SecurityVPCNATGWRouteTableAZ1
+  SecurityVPCNATGWRouteTableAZ2: 
+    Value: !Ref SecurityVPCNATGWRouteTableAZ2
+  SecurityVPCInsideSubnetAZ1:
+    Condition: CreateCiscoResources #Must be set for Fortinet/Palo/Opensource/Cisco options
+    Value: !Ref SecurityVPCInsideSubnetAZ1
+  SecurityVPCInsideSubnetAZ2:
+    Condition: CreateCiscoResources #Must be set for Fortinet/Palo/Opensource/Cisco options
+    Value: !Ref SecurityVPCInsideSubnetAZ2
+  SecurityVPCInsideRouteTable:
+    Condition: CreateCiscoResources #Must be set for Fortinet/Palo/Opensource/Cisco options
+    Value: !Ref SecurityVPCInsideRouteTable
+  
+  # TGW Output
+  GWLBLabTGW:
+    Value: !Ref GWLBLabTGW
+  SecurityVPCAttachment:
+    Value: !Ref SecurityVPCAttachment

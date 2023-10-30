@@ -1,0 +1,106 @@
+curl -H 'Content-Type ''' -X PUT -d '
+
+
+curl -H 'Content-Type ''' -X PUT -d '{"Status": "DELETE", "Reason": "See the details in CloudWatch Log Stream: 2022/09/05/[$LATEST]1d2fcf61edad42c9ac5091b631be19d3", "PhysicalResourceId": "2022/09/05/[$LATEST]1d2fcf61edad42c9ac5091b631be19d3", "StackId": "arn:aws:cloudformation:us-east-1:838455015986:stack/gwlblab-test-stack-GWLBStack-1JXY01ZB4SD26/c8dad400-2d3e-11ed-9720-12f3ad7e0689", "RequestId": "111a37dc-3c65-4495-9155-0ce72372e19d", "LogicalResourceId": "TriggertoUpdateRoutes”}' 'https://cloudformation-custom-resource-response-useast1.s3.amazonaws.com/arn%3Aaws%3Acloudformation%3Aus-east-1%3A838455015986%3Astack/gwlblab-test-stack-GWLBStack-1JXY01ZB4SD26/c8dad400-2d3e-11ed-9720-12f3ad7e0689%7CTriggertoUpdateRoutes%7C111a37dc-3c65-4495-9155-0ce72372e19d?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20220905T172932Z&X-Amz-SignedHeaders=host&X-Amz-Expires=7200&X-Amz-Credential=AKIA6L7Q4OWTVPX5N4HK%2F20220905%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Signature=9f2c53073b956e465b7b145b9824a6a5e167c57045c63b9c86819d4c5ec72fe7'
+
+
+curl -H 'Content-Type ''' -X PUT -d '
+
+
+tgw-id for gwlblab
+tgw-09beec26d3bd7eca2
+
+Security VPC attachment
+tgw-attach-035ec935632e89441
+
+VPC1 
+tgw-attach-0344fb7a50dbe13c5
+
+VPC2
+tgw-attach-0d602ed44b7161664
+
+Enable
+
+SecurityVPC
+aws ec2 modify-transit-gateway-vpc-attachment \
+--transit-gateway-attachment-id tgw-attach-01479cb7ced4d5de1 \
+--options "ApplianceModeSupport=enable"
+
+aws ec2 modify-transit-gateway-vpc-attachment \
+--transit-gateway-attachment-id tgw-attach-035ec935632e89441 \
+--options "DnsSupport=enable"
+
+VPC1
+aws ec2 modify-transit-gateway-vpc-attachment \
+--transit-gateway-attachment-id tgw-attach-016584b3eceec227a \
+--options "ApplianceModeSupport=enable"
+
+aws ec2 modify-transit-gateway-vpc-attachment \
+--transit-gateway-attachment-id tgw-attach-035ec935632e89441 \
+--options "DnsSupport=enable"
+
+VPC2
+aws ec2 modify-transit-gateway-vpc-attachment \
+--transit-gateway-attachment-id tgw-attach-0bd3842fbb05c515d \
+--options "ApplianceModeSupport=enable"
+
+aws ec2 modify-transit-gateway-vpc-attachment \
+--transit-gateway-attachment-id tgw-attach-0d602ed44b7161664 \
+--options "DnsSupport=enable"
+
+
+Disable
+SecurityVPC
+aws ec2 modify-transit-gateway-vpc-attachment \
+--transit-gateway-attachment-id tgw-attach-035ec935632e89441 \
+--options "ApplianceModeSupport=disable"
+
+VPC1
+aws ec2 modify-transit-gateway-vpc-attachment \
+--transit-gateway-attachment-id tgw-attach-035ec935632e89441 \
+--options "ApplianceModeSupport=disable"
+
+VPC2
+aws ec2 modify-transit-gateway-vpc-attachment \
+--transit-gateway-attachment-id tgw-attach-0d602ed44b7161664 \
+--options "ApplianceModeSupport=disable"
+
+
+
+def parse(pkt):
+
+    if pkt.haslayer(TCP) and pkt.getlayer(TCP).dport == 80 and pkt.haslayer(Raw):
+        pkt = pkt / "New Header:value\r\n\r\n"
+        new_hdr = 'New Header: value'
+        hdr = old_hdr.split('\r\n') # This is a crappy hack. Parsing HTTP headers
+        hdr.insert(new_hdr, 2)      # is a [solved problem][1].
+        send_hdr = '\r\n'.join(hdr)
+        pkt[TCP].payload = send_hdr 
+    
+    del pkt[TCP].chksum
+
+Enable
+aws ec2 modify-transit-gateway-vpc-attachment \
+--transit-gateway-attachment-id tgw-attach-052f6f82d6622ed92 \
+--options "ApplianceModeSupport=enable"
+
+aws ec2 modify-transit-gateway-vpc-attachment \
+--transit-gateway-attachment-id tgw-attach-0649f4233f04f2978 \
+--options "ApplianceModeSupport=enable"
+
+aws ec2 modify-transit-gateway-vpc-attachment \
+--transit-gateway-attachment-id tgw-attach-04569a1622daec573 \
+--options "ApplianceModeSupport=enable"
+
+Disable
+aws ec2 modify-transit-gateway-vpc-attachment \
+--transit-gateway-attachment-id tgw-attach-052f6f82d6622ed92 \
+--options "ApplianceModeSupport=disable"
+
+aws ec2 modify-transit-gateway-vpc-attachment \
+--transit-gateway-attachment-id tgw-attach-0649f4233f04f2978 \
+--options "ApplianceModeSupport=disable"
+
+aws ec2 modify-transit-gateway-vpc-attachment \
+--transit-gateway-attachment-id tgw-attach-04569a1622daec573 \
+--options "ApplianceModeSupport=disable"

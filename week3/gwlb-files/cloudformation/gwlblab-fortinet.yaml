@@ -1,0 +1,322 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  Fortinet Deployment Template with reference to BootStrap script. 
+
+# ======================================================================================================================
+#   Mappings
+# ======================================================================================================================
+
+Mappings:
+  RegionMap:
+    "us-east-1": # North Virginia
+      FortinetAMI: "ami-035a7ca1d22b2ac60"
+    "us-east-2": # Ohio
+      FortinetAMI: "ami-0c89751940e00028a"
+    "us-west-1": # N. California
+      FortinetAMI: "ami-027023effe0d0cbcb"
+    "us-west-2": # Oregon
+      FortinetAMI: "ami-0e18da7f57b1455de"
+    "ap-southeast-1": # Singapore
+      FortinetAMI: "ami-0abcebf6fa84ec1c9"
+    "ap-southeast-2": # Sydney
+      FortinetAMI: "ami-0d4a09cac89f2cb2b"
+    "ap-northeast-1": # Tokyo
+      FortinetAMI: "ami-08e9a008d439bd92d"
+    "ca-central-1": # Canada (Central)
+      FortinetAMI: "ami-0f575e9fe174cc613"
+    "eu-central-1": # Frankfurt
+      FortinetAMI: "ami-09b319a3f356c62a3"
+    "eu-west-1": # Ireland
+      FortinetAMI: "ami-0295b18e7c5c68440"
+    "eu-west-2": # London
+      FortinetAMI: "ami-0e0cf6ee5949311d3"
+    "eu-south-1": # Milan
+      FortinetAMI: "ami-00c0fd80460334680"
+    "eu-west-3": # Paris
+      FortinetAMI: "ami-0a2f70eeaccb4f756"
+    "eu-north-1": # Stockholm
+      FortinetAMI: "ami-0980a6c5462eb20c7"
+    "sa-east-1": # Sao Paolo
+      FortinetAMI: "ami-0f857d7ef57d996d7"
+    
+
+# ======================================================================================================================
+#   Parameters
+# ======================================================================================================================
+
+Parameters:
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   Passed Pramaters from Main Stack
+# ----------------------------------------------------------------------------------------------------------------------
+
+  #Desired Stack Name
+  GlobalStackName:
+    Description: Stackname that you would like to uniquely identify your resources.
+    Type: String
+
+  #Security VPC Parameters
+  SecurityVPC: 
+    Type: AWS::EC2::VPC::Id
+    Description: 'The VPC ID'
+  SecurityVPCCIDR:
+    Type: String
+    Description: Provide a/16 CIDR space.
+  SecurityVPCVMSeriesDataSubnetAZ1: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+  SecurityVPCVMSeriesDataSubnetAZ2: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+  SecurityVPCNATGWSubnetAZ1: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+  SecurityVPCNATGWSubnetAZ2: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+  SecurityVPCVMSeriesManagementSecurityGroup: 
+    Type: String
+    Description: 'Security Group for Management interfaces on VMSeries Instances'
+  SecurityVPCVMSeriesDataSecurityGroup: 
+    Type: String
+    Description: 'Security Group for Data Interfaces on VMSeries Instances'
+
+  VMSeriesInstanceProfile: 
+    Type: String
+    Description: 'Instance Profile for VPCs'
+
+
+  #Management Network CIDR
+  RemoteManagementCIDR:
+    Description: >-
+      Remote Management CIDR to be allowed management access to VM-Series Firewall (e.g. 192.168.0.0/25)
+    Type: String
+
+  #EC2 key pair for the deployment
+  EC2KeyPair:
+    Description: >-
+      AWS EC2 Instance Key Pair for authentication to the VM-Series Firewalls.
+    Type: AWS::EC2::KeyPair::KeyName
+
+  #Fortinet Instance Parameters
+  FortinetInstanceType: 
+    Description: 'Fortinet Instance Type'
+    Type: String
+  FortinetAMI: 
+    Description: 'Fortinet AMI'
+    Type: String
+    
+  GWLBLabS3BootstrapBucket:
+    Description: 'Bucket used for GWLB Bootstrapping'
+    Type: String
+
+
+# ======================================================================================================================
+#   Resources
+# ======================================================================================================================
+
+Resources: 
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   First Fortinet Instance - AZ1
+# ----------------------------------------------------------------------------------------------------------------------
+
+  FortinetManagementENIAZ1:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: Fortinet-Management-01-AZ1
+      GroupSet: [ !Ref SecurityVPCVMSeriesManagementSecurityGroup ]
+      SubnetId: !Ref SecurityVPCNATGWSubnetAZ1
+      PrivateIpAddress: "10.0.6.50"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'Fortinet-Management-01-AZ1'] ]
+
+  FortinetManagementEIPAZ1:
+    Type: AWS::EC2::EIP
+    #DependsOn: SecurityIGWAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'Fortinet-Management-01-AZ1'] ]
+
+  FortinetManagementEIPAssociationAZ1:
+    Type: AWS::EC2::EIPAssociation
+    DependsOn: FortinetManagementEIPAZ1
+    Properties:
+      AllocationId: !GetAtt FortinetManagementEIPAZ1.AllocationId
+      NetworkInterfaceId: !Ref FortinetManagementENIAZ1
+
+  FortinetDataENIAZ1:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: Fortinet-Data-01-AZ1
+      SourceDestCheck: No
+      GroupSet: [ !Ref SecurityVPCVMSeriesDataSecurityGroup ]
+      SubnetId: !Ref SecurityVPCVMSeriesDataSubnetAZ1
+      PrivateIpAddress: "10.0.4.50"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'Fortinet-Data-01-AZ1'] ]
+
+  FortinetInstanceAZ1:
+    Type: AWS::EC2::Instance
+    DependsOn: 
+      - FortinetManagementEIPAZ1
+      - FortinetDataENIAZ1
+      - FortinetManagementEIPAssociationAZ1
+    Properties:
+      DisableApiTermination: false
+      InstanceInitiatedShutdownBehavior: stop
+      EbsOptimized: true
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", FortinetAMI]
+      InstanceType: !Ref FortinetInstanceType
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: gp2
+            DeleteOnTermination: true
+            VolumeSize: 30
+        - DeviceName: /dev/sdb
+          Ebs:
+            VolumeType: gp2
+            DeleteOnTermination: true
+            VolumeSize: 30
+      KeyName: !Ref EC2KeyPair
+      Monitoring: false
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'Fortinet-01-AZ1'] ]
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref FortinetDataENIAZ1
+          DeviceIndex: '0'
+        - NetworkInterfaceId: !Ref FortinetManagementENIAZ1
+          DeviceIndex: '1'
+      IamInstanceProfile: !Ref VMSeriesInstanceProfile
+      UserData: 
+        Fn::Base64: !Sub |
+          {
+            "bucket" : "${GWLBLabS3BootstrapBucket}",
+            "region" : "${AWS::Region}",
+            "config" : "fortinet-config/fortinet-config-1a.conf",
+          }
+            
+# ----------------------------------------------------------------------------------------------------------------------
+#   Second Fortinet Instance - AZ2
+# ----------------------------------------------------------------------------------------------------------------------
+
+  FortinetManagementENIAZ2:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: Fortinet-Management-01-AZ2
+      GroupSet: [ !Ref SecurityVPCVMSeriesManagementSecurityGroup ]
+      SubnetId: !Ref SecurityVPCNATGWSubnetAZ2
+      PrivateIpAddress: "10.0.7.50"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'Fortinet-Management-02-AZ2'] ]
+
+  FortinetManagementEIPAZ2:
+    Type: AWS::EC2::EIP
+    #DependsOn: SecurityIGWAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'Fortinet-Management-02-AZ2'] ]
+
+  FortinetManagementEIPAssociationAZ2:
+    Type: AWS::EC2::EIPAssociation
+    DependsOn: FortinetManagementEIPAZ2
+    Properties:
+      AllocationId: !GetAtt FortinetManagementEIPAZ2.AllocationId
+      NetworkInterfaceId: !Ref FortinetManagementENIAZ2
+
+  FortinetDataENIAZ2:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: Fortinet-Data-02-AZ2
+      SourceDestCheck: No
+      GroupSet: [ !Ref SecurityVPCVMSeriesDataSecurityGroup ]
+      SubnetId: !Ref SecurityVPCVMSeriesDataSubnetAZ2
+      PrivateIpAddress: "10.0.5.50"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'Fortinet-Data-02-AZ2'] ]
+
+  FortinetInstanceAZ2:
+    Type: AWS::EC2::Instance
+    DependsOn: 
+      - FortinetManagementEIPAZ2
+      - FortinetDataENIAZ2
+      - FortinetManagementEIPAssociationAZ2
+    Properties:
+      DisableApiTermination: false
+      InstanceInitiatedShutdownBehavior: stop
+      EbsOptimized: true
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", FortinetAMI] 
+      InstanceType: !Ref FortinetInstanceType
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: gp2
+            DeleteOnTermination: true
+            VolumeSize: 30
+        - DeviceName: /dev/sdb
+          Ebs:
+            VolumeType: gp2
+            DeleteOnTermination: true
+            VolumeSize: 30
+      KeyName: !Ref EC2KeyPair
+      Monitoring: false
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'Fortinet-02-AZ2'] ]
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref FortinetDataENIAZ2
+          DeviceIndex: '0'
+        - NetworkInterfaceId: !Ref FortinetManagementENIAZ2
+          DeviceIndex: '1'
+      IamInstanceProfile: !Ref VMSeriesInstanceProfile
+      UserData: 
+        Fn::Base64: !Sub |
+          {
+            "bucket" : "${GWLBLabS3BootstrapBucket}",
+            "region" : "${AWS::Region}",
+            "config" : "fortinet-config/fortinet-config-1b.conf",
+          }
+
+# ======================================================================================================================
+#   Outputs
+# ======================================================================================================================
+
+Outputs:
+
+  Fortinet01AZ1:
+    Description: "Connect first into Fortinet Instance"
+    Value: !Sub |
+      ssh -i ${EC2KeyPair} admin@${FortinetManagementEIPAZ1}
+    Export: 
+      Name: !Sub ${GlobalStackName}-Fortinet-01-AZ1
+
+  Fortinet02AZ2: 
+    Description: "Connect into second Fortinet Instance"
+    Value: !Sub | 
+      ssh -i ${EC2KeyPair} admin@${FortinetManagementEIPAZ2}
+    Export: 
+      Name: !Sub ${GlobalStackName}-Fortinet-02-AZ2
+  
+  FortinetInstanceAZ1: 
+    Description: "Instance ID for Fortinet-01-AZ1"
+    Value: !Ref FortinetInstanceAZ1
+    Export: 
+      Name: !Sub ${GlobalStackName}-Fortinet-01-AZ1-InstanceId
+
+  FortinetInstanceAZ2: 
+    Description: "Instance ID for Fortinet-02-AZ2"
+    Value: !Ref FortinetInstanceAZ2
+    Export: 
+      Name: !Sub ${GlobalStackName}-Fortinet-02-AZ2-InstanceId
+  

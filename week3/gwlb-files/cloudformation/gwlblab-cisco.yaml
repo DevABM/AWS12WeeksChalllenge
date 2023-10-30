@@ -1,0 +1,655 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  Cisco Deployment Template with Lambda function to Configure FMC. 
+
+# ======================================================================================================================
+#   Mappings
+# ======================================================================================================================
+
+Mappings:
+  RegionMapFTD: 
+    # Cisco FTDv Ver 7.2.4-165
+    "us-east-1": # North Virginia
+      CiscoFTDvAMI: "ami-0f44cc269ea36a91b"
+    "us-east-2": # Ohio
+      CiscoFTDvAMI: "ami-0ca2597186bc52a01"
+    "us-west-1": # N. California
+      CiscoFTDvAMI: "ami-01938025441a0ac05"
+    "us-west-2": # Oregon
+      CiscoFTDvAMI: "ami-057d8abf40e86f4ad"
+    "ap-south-1": # Mumbai
+      CiscoFTDvAMI: "ami-0e3d11544551c4fff"
+    "ap-northeast-3": # Osaka
+      CiscoFTDvAMI: "ami-0182d673f2456827f"
+    "ap-northeast-2": # Seoul
+      CiscoFTDvAMI: "ami-011a6ecbde3c4e5cd"
+    "ap-northeast-1": # Tokyo
+      CiscoFTDvAMI: "ami-07eeaa0176be77683"
+    "ap-southeast-1": # Singapore
+      CiscoFTDvAMI: "ami-0b863c55bfa05e73c"
+    "ap-southeast-2": # Sydney
+      CiscoFTDvAMI: "ami-0051ff0f871b472fe"
+    "eu-west-3": # Paris
+      CiscoFTDvAMI: "ami-002debff1073bc7b4"
+    "eu-west-2": # London
+      CiscoFTDvAMI: "ami-0bae089737e206637"
+    "eu-west-1": # Ireland
+      CiscoFTDvAMI: "ami-0a5afb109d8339e4d"
+    "sa-east-1": # Sao Paulo
+      CiscoFTDvAMI: "ami-044885abee56f31ed"
+    "ca-central-1": # Canada Central
+      CiscoFTDvAMI: "ami-0e269d7541fec4f84"
+    "eu-central-1": # Frankfurt
+      CiscoFTDvAMI: "ami-0f2546eba49963db5"
+
+  RegionMapFMC:
+    # Cisco FMC Ver 7.2.4-165
+    "us-east-1": # North Virginia
+      CiscoFMCAMI: "ami-00058c82a38b95bc3"
+    "us-east-2": # Ohio
+      CiscoFMCAMI: "ami-0512b857665960c43"
+    "us-west-1": # N. California
+      CiscoFMCAMI: "ami-0baa81d3faf9c9551"
+    "us-west-2": # Oregon
+      CiscoFMCAMI: "ami-0ff4bee1642c19ad7"
+    "ap-south-1": # Mumbai
+      CiscoFMCAMI: "ami-0b830904fe6659b51"
+    "ap-northeast-3": # Osaka Start from here
+      CiscoFMCAMI: "ami-0106dac04735ccfde"
+    "ap-northeast-2": # Seoul
+      CiscoFMCAMI: "ami-01607112b07013457"
+    "ap-northeast-1": # Tokyo
+      CiscoFMCAMI: "ami-0771d01ce816e771f"
+    "ap-southeast-1": # Singapore
+      CiscoFMCAMI: "ami-0546b76898eef8149"
+    "ap-southeast-2": # Sydney
+      CiscoFMCAMI: "ami-0f5fe3811b48b0a07"
+    "eu-west-3": # Paris
+      CiscoFMCAMI: "ami-05b181022c14c930e"
+    "eu-west-2": # London
+      CiscoFMCAMI: "ami-090b18b991fb9adb7"
+    "eu-west-1": # Ireland
+      CiscoFMCAMI: "ami-03cfcd0554c947be9"
+    "sa-east-1": # Sao Paulo
+      CiscoFMCAMI: "ami-0098fa50f2da475ee"
+    "ca-central-1": # Canada Central
+      CiscoFMCAMI: "ami-0143188f835dd59a4"
+    "eu-central-1": # Frankfurt
+      CiscoFMCAMI: "ami-0c815a58af1252007"
+    
+
+# ======================================================================================================================
+#   Parameters
+# ======================================================================================================================
+
+Parameters:
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   Passed Pramaters from Main Stack
+# ----------------------------------------------------------------------------------------------------------------------
+
+  #Desired Stack Name
+  GlobalStackName:
+    Description: Stackname that you would like to uniquely identify your resources.
+    Type: String
+
+  #Security VPC Parameters
+  SecurityVPC: 
+    Type: AWS::EC2::VPC::Id
+    Description: 'The VPC ID'
+  SecurityVPCCIDR:
+    Type: String
+    Description: Provide a/16 CIDR space.
+  SecurityVPCVMSeriesDataSubnetAZ1: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+  SecurityVPCVMSeriesDataSubnetAZ2: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+  SecurityVPCNATGWSubnetAZ1: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+  SecurityVPCNATGWSubnetAZ2: 
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+  SecurityVPCInsideSubnetAZ1:
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+  SecurityVPCInsideSubnetAZ2:
+    Type: AWS::EC2::Subnet::Id
+    Description: 'The Subnet ID'
+  SecurityVPCVMSeriesManagementSecurityGroup: 
+    Type: String
+    Description: 'Security Group for Management interfaces on VMSeries Instances'
+  SecurityVPCVMSeriesDataSecurityGroup: 
+    Type: String
+    Description: 'Security Group for Data Interfaces on VMSeries Instances'
+
+
+  #Management Network CIDR
+  RemoteManagementCIDR:
+    Description: >-
+      Remote Management CIDR to be allowed management access to VM-Series Firewall (e.g. 192.168.0.0/25)
+    Type: String
+
+  #EC2 key pair for the deployment
+  EC2KeyPair:
+    Description: >-
+      AWS EC2 Instance Key Pair for authentication to the VM-Series Firewalls.
+    Type: AWS::EC2::KeyPair::KeyName
+
+  #Cisco FTDv Instance Parameters
+  CiscoFTDvInstanceType: 
+    Description: 'Cisco FTDv Instance Type'
+    Type: String
+    
+  CiscoFTDvAMI: 
+    Description: 'Cisco FTDv AMI'
+    Type: String
+
+  #Cisco FMC Instance Parameters
+  CiscoFMCInstanceType: 
+    Description: 'Cisco FMC Instance Type'
+    Type: String
+
+  CiscoFMCAMI: 
+    Description: 'Cisco FMC Instance Type'
+    Type: String
+
+  GWLBLabS3BootstrapBucket:
+    Description: 'Bucket used for GWLB Bootstrapping'
+    Type: String
+
+  VMSeriesInstanceProfile: 
+    Type: String
+    Description: 'Instance Profile for VPCs'
+
+
+  NLBApplicationURL:
+    Type: String
+    Description: 'NLB URL to be used with ACL Rules'
+
+# ======================================================================================================================
+#   Resources
+# ======================================================================================================================
+Resources:
+
+# ======================================================================================================================
+#   Security Groups
+# ======================================================================================================================
+
+# Inside Security Group for Inside Interfaces. No inbound access needed
+  SecurityVPCInsideENISecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref SecurityVPC
+      GroupName: !Sub ${GlobalStackName}-FTD-InsideENIs-HealthCheck
+      GroupDescription: VM-Series Management Security Group
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'FTD-InsideENIs-HealthCheck'] ]
+
+# Outside Security Group for Inside Interfaces. No inbound access needed
+  SecurityVPCOutsideENISecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref SecurityVPC
+      GroupName: !Sub ${GlobalStackName}-FTD-Outside-GENEVE-Tunnel
+      GroupDescription: VM-Series Management Security Group
+      SecurityGroupIngress:
+        - CidrIp: 10.0.0.0/16
+          FromPort: 8080
+          ToPort: 8080
+          IpProtocol: tcp
+        # Add additional inbound role to Outside Interface Security Group for Cisco FMC
+        - CidrIp: !Ref SecurityVPCCIDR
+          FromPort: 8305
+          ToPort: 8305
+          IpProtocol: tcp
+        # Add additional inbound role to Outside Interface Security Group for Geneve tunnel packets
+        - CidrIp: !Ref SecurityVPCCIDR
+          FromPort: 6081
+          ToPort: 6081
+          IpProtocol: udp
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'FTD-Outside-GENEVE-Tunnel'] ]
+
+# ======================================================================================================================
+#   FMC01 & FMC02
+# ======================================================================================================================
+
+#Cisco Management Interface for FMCv01
+  FMCv01ManagementENIAZ1:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: FMCv01-Management-01-AZ1
+      GroupSet: [ !Ref SecurityVPCVMSeriesManagementSecurityGroup ]
+      SubnetId: !Ref SecurityVPCNATGWSubnetAZ1
+      PrivateIpAddress: "10.0.6.50"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'FMCv01-Management-01-AZ1'] ]
+
+  FMCv01ManagementEIPAZ1:
+    Type: AWS::EC2::EIP
+    #DependsOn: SecurityIGWAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'FMCv01-Management-01-AZ1'] ]
+
+  FMCv01ManagementEIPAssociationAZ1:
+    Type: AWS::EC2::EIPAssociation
+    DependsOn: FMCv01ManagementEIPAZ1
+    Properties:
+      AllocationId: !GetAtt FMCv01ManagementEIPAZ1.AllocationId
+      NetworkInterfaceId: !Ref FMCv01ManagementENIAZ1
+
+#Cisco Management Interface for FMCv02
+  FMCv02ManagementENIAZ2:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: FMCv02-Management-01-AZ2
+      GroupSet: [ !Ref SecurityVPCVMSeriesManagementSecurityGroup ]
+      SubnetId: !Ref SecurityVPCNATGWSubnetAZ2
+      PrivateIpAddress: "10.0.7.50"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'FMCv02-Management-01-AZ2'] ]
+
+  FMCv02ManagementEIPAZ2:
+    Type: AWS::EC2::EIP
+    #DependsOn: SecurityIGWAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'FMCv02-Management-01-AZ2'] ]
+
+  FMCv02ManagementEIPAssociationAZ2:
+    Type: AWS::EC2::EIPAssociation
+    DependsOn: FMCv02ManagementEIPAZ2
+    Properties:
+      AllocationId: !GetAtt FMCv02ManagementEIPAZ2.AllocationId
+      NetworkInterfaceId: !Ref FMCv02ManagementENIAZ2
+
+  FMC01InstanceAZ1:
+    Type: AWS::EC2::Instance
+    DependsOn: 
+      - FMCv01ManagementENIAZ1
+      - FMCv01ManagementEIPAZ1
+      - FMCv01ManagementEIPAssociationAZ1
+    Properties:
+      DisableApiTermination: false
+      InstanceInitiatedShutdownBehavior: stop
+      EbsOptimized: true
+      ImageId: !FindInMap [RegionMapFMC, !Ref "AWS::Region", CiscoFMCAMI] 
+      InstanceType: !Ref CiscoFMCInstanceType
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: gp2
+            DeleteOnTermination: true
+            VolumeSize: 250
+      KeyName: !Ref EC2KeyPair
+      Monitoring: false
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'FMC01-AZ1'] ]
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref FMCv01ManagementENIAZ1
+          DeviceIndex: '0'
+      IamInstanceProfile: !Ref VMSeriesInstanceProfile
+      UserData: 
+        Fn::Base64: !Sub |
+          {
+          "AdminPassword": "Password@123!",
+          "Hostname": "FMC01"
+          }
+
+  FMC02InstanceAZ2:
+    Type: AWS::EC2::Instance
+    DependsOn: 
+      - FMCv02ManagementENIAZ2
+      - FMCv02ManagementEIPAZ2
+      - FMCv02ManagementEIPAssociationAZ2
+    Properties:
+      DisableApiTermination: false
+      InstanceInitiatedShutdownBehavior: stop
+      EbsOptimized: true
+      ImageId: !FindInMap [RegionMapFMC, !Ref "AWS::Region", CiscoFMCAMI] 
+      InstanceType: !Ref CiscoFMCInstanceType
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: gp2
+            DeleteOnTermination: true
+            VolumeSize: 250
+      KeyName: !Ref EC2KeyPair
+      Monitoring: false
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'FMC02-AZ2'] ]
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref FMCv02ManagementENIAZ2
+          DeviceIndex: '0'
+      IamInstanceProfile: !Ref VMSeriesInstanceProfile
+      UserData: 
+        Fn::Base64: !Sub |
+          {
+          "AdminPassword": "Password@123!",
+          "Hostname": "FMC02"
+          }
+
+# ======================================================================================================================
+#   FTDv01
+# ======================================================================================================================
+
+#Cisco Management Interface for FTDv01
+  FTDv01ManagementENIAZ1:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: FTDv01-Management-AZ1
+      GroupSet: [ !Ref SecurityVPCVMSeriesManagementSecurityGroup ]
+      SubnetId: !Ref SecurityVPCNATGWSubnetAZ1
+      PrivateIpAddress: "10.0.6.60"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'FTDv01-Management-AZ1'] ]
+
+#Cisco Diag Interface for FTDv01
+  FTDv01DiagENIAZ1:
+    Type: AWS::EC2::NetworkInterface
+    DependsOn: SecurityVPCInsideENISecurityGroup
+    Properties:
+      Description: FTDv01-Diag-AZ1
+      GroupSet: [ !Ref SecurityVPCInsideENISecurityGroup ]
+      SubnetId: !Ref SecurityVPCNATGWSubnetAZ1
+      PrivateIpAddress: "10.0.6.61"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'FTDv01-Diag-AZ1'] ]
+
+
+#Cisco Inside Interface for FTDv01
+  FTDv01InsideENIAZ1:
+    Type: AWS::EC2::NetworkInterface
+    DependsOn: SecurityVPCInsideENISecurityGroup
+    Properties:
+      Description: FTDv01-Inside-AZ1
+      SubnetId: !Ref SecurityVPCInsideSubnetAZ1
+      GroupSet: [ !Ref SecurityVPCInsideENISecurityGroup ]
+      PrivateIpAddress: "10.0.8.60"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'FTDv01-Inside-AZ1'] ]
+
+#Cisco Outside Interface for FTDv01
+  FTDv01OutsideENIAZ1:
+    Type: AWS::EC2::NetworkInterface
+    DependsOn: SecurityVPCOutsideENISecurityGroup
+    Properties:
+      Description: Cisco-Outside-01-AZ1
+      SourceDestCheck: No
+      GroupSet: [ !Ref SecurityVPCOutsideENISecurityGroup ]
+      SubnetId: !Ref SecurityVPCVMSeriesDataSubnetAZ1
+      PrivateIpAddress: "10.0.4.60"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'Cisco-Outside-01-AZ1'] ]
+
+  FTDv01InstanceAZ1:
+    Type: AWS::EC2::Instance
+    DependsOn: 
+      - FTDv01ManagementENIAZ1
+      - FTDv01DiagENIAZ1
+      - FTDv01InsideENIAZ1
+      - FTDv01OutsideENIAZ1
+    Properties:
+      DisableApiTermination: false
+      InstanceInitiatedShutdownBehavior: stop
+      EbsOptimized: true
+      ImageId: !FindInMap [RegionMapFTD, !Ref "AWS::Region", CiscoFTDvAMI] 
+      InstanceType: !Ref CiscoFTDvInstanceType
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: gp2
+            DeleteOnTermination: true
+            VolumeSize: 52
+      KeyName: !Ref EC2KeyPair
+      Monitoring: false
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'FTDv01-AZ1'] ]
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref FTDv01ManagementENIAZ1
+          DeviceIndex: '0'
+        - NetworkInterfaceId: !Ref FTDv01DiagENIAZ1
+          DeviceIndex: '1'
+        - NetworkInterfaceId: !Ref FTDv01InsideENIAZ1
+          DeviceIndex: '2'
+        - NetworkInterfaceId: !Ref FTDv01OutsideENIAZ1
+          DeviceIndex: '3'
+      IamInstanceProfile: !Ref VMSeriesInstanceProfile
+      UserData: 
+        Fn::Base64: !Sub |
+          {
+          "AdminPassword": "Password@123!",
+          "Hostname": "FTDv01-AZ1",
+          "ManageLocally": "No",
+          "FmcIp": "10.0.6.50",
+          "FmcRegKey": "Cisco-123"
+          }
+
+
+
+# ======================================================================================================================
+#   FTDv02
+# ======================================================================================================================
+
+#Cisco Management Interface for FTDv02
+  FTDv02ManagementENIAZ2:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: FTDv02-Management-AZ2
+      SubnetId: !Ref SecurityVPCNATGWSubnetAZ2
+      GroupSet: [ !Ref SecurityVPCVMSeriesManagementSecurityGroup ]
+      PrivateIpAddress: "10.0.7.60"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'FTDv02-Management-AZ2'] ]
+
+
+#Cisco Diag Interface for FTDv02
+  FTDv02DiagENIAZ2:
+    Type: AWS::EC2::NetworkInterface
+    DependsOn: SecurityVPCInsideENISecurityGroup
+    Properties:
+      Description: FTDv02-Diag-AZ2
+      GroupSet: [ !Ref SecurityVPCInsideENISecurityGroup ]
+      SubnetId: !Ref SecurityVPCNATGWSubnetAZ2
+      PrivateIpAddress: "10.0.7.61"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'FTDv02-Diag-AZ2'] ]
+
+#Cisco Inside Interface for FTDv02
+  FTDv02InsideENIAZ2:
+    Type: AWS::EC2::NetworkInterface
+    DependsOn: SecurityVPCInsideENISecurityGroup
+    Properties:
+      Description: FTDv02-Inside-AZ2
+      SubnetId: !Ref SecurityVPCInsideSubnetAZ2
+      GroupSet: [ !Ref SecurityVPCInsideENISecurityGroup ]
+      PrivateIpAddress: "10.0.9.60"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'FTDv02-Inside-AZ2'] ]
+
+#Cisco Outside Interface for FTDv02
+  FTDv02OutsideENIAZ2:
+    Type: AWS::EC2::NetworkInterface
+    DependsOn: SecurityVPCOutsideENISecurityGroup
+    Properties:
+      Description: Cisco-Outside-02-AZ2
+      SourceDestCheck: No
+      GroupSet: [ !Ref SecurityVPCOutsideENISecurityGroup ]
+      SubnetId: !Ref SecurityVPCVMSeriesDataSubnetAZ2
+      PrivateIpAddress: "10.0.5.60"
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'Cisco-Outside-02-AZ2'] ]
+
+  FTDv02InstanceAZ2:
+    Type: AWS::EC2::Instance
+    DependsOn: 
+      - FTDv02ManagementENIAZ2
+      - FTDv02DiagENIAZ2
+      - FTDv02InsideENIAZ2
+      - FTDv02OutsideENIAZ2
+    Properties:
+      DisableApiTermination: false
+      InstanceInitiatedShutdownBehavior: stop
+      EbsOptimized: true
+      ImageId: !FindInMap [RegionMapFTD, !Ref "AWS::Region", CiscoFTDvAMI] 
+      InstanceType: !Ref CiscoFTDvInstanceType
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: gp2
+            DeleteOnTermination: true
+            VolumeSize: 52
+      KeyName: !Ref EC2KeyPair
+      Monitoring: false
+      Tags:
+        - Key: Name
+          Value: !Join [ '-' , [ !Ref "GlobalStackName", 'FTDv02-AZ2'] ]
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref FTDv02ManagementENIAZ2
+          DeviceIndex: '0'
+        - NetworkInterfaceId: !Ref FTDv02DiagENIAZ2
+          DeviceIndex: '1'
+        - NetworkInterfaceId: !Ref FTDv02InsideENIAZ2
+          DeviceIndex: '2'
+        - NetworkInterfaceId: !Ref FTDv02OutsideENIAZ2
+          DeviceIndex: '3'
+      IamInstanceProfile: !Ref VMSeriesInstanceProfile
+      UserData: 
+        Fn::Base64: !Sub |
+          {
+          "AdminPassword": "Password@123!",
+          "Hostname": "FTDv02-AZ2",
+          "ManageLocally": "No",
+          "FmcIp": "10.0.6.50",
+          "FmcRegKey": "Cisco-123"
+          }
+
+# ======================================================================================================================
+#   Creating Lambda Function to configure FMC via APIs
+# ======================================================================================================================
+
+  LambdaZipsBucket:
+    Type: AWS::S3::Bucket
+
+  MyLambdaFunctionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: AllowLambdaCallsFMC
+      VpcId: !Ref SecurityVPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: '0.0.0.0/0' # Allow all outbound traffic
+
+  MyLambdaFunction:
+    DependsOn: FMCAPILambdaLayer
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket: !Ref GWLBLabS3BootstrapBucket
+        S3Key: !Sub 'cisco-config/lambda.zip'
+      FunctionName: ConfigureFMC01
+      Handler: FMC01-API.lambda_handler
+      Role: !GetAtt MyLambdaRole.Arn
+      Runtime: python3.9
+      Timeout: 720
+      Environment:
+        Variables:
+          fmcip: !GetAtt FMC01InstanceAZ1.PrivateIp
+          password: "secretpassword"
+          NLBURL: !Ref NLBApplicationURL
+      Layers:
+        - !Ref FMCAPILambdaLayer
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref MyLambdaFunctionSecurityGroup
+        SubnetIds:
+          - !Ref SecurityVPCNATGWSubnetAZ1
+
+  MyLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: MyLambdaRolePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: arn:aws:s3:::*
+              - Effect: Allow
+                Action: 
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                Resource: "*"
+
+  FMCAPILambdaLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      CompatibleRuntimes:
+        - python3.9
+      Content:
+        S3Bucket: !Ref GWLBLabS3BootstrapBucket
+        S3Key: 'cisco-config/python.zip'
+      Description: FMCAPI Library Layer
+
+
+# ======================================================================================================================
+#   Outputs
+# ======================================================================================================================
+
+Outputs:
+
+  FMC01PublicIP:
+    Description: "FMC01 Public IP for Management"
+    Value: !GetAtt FMCv01ManagementEIPAZ1.PublicIp
+  FMC02PublicIP:
+    Description: "FMC02 Public IP for Management"
+    Value: !GetAtt FMCv02ManagementEIPAZ2.PublicIp
+  FTD01OutsideIP:
+    Description: "FTD01 Outside Interface IP to be used with Traget Group"
+    Value: "10.0.4.60"
+  FTD02OutsideIP:
+    Description: "FTD02 Outside Interface IP to be used with Traget Group"
+    Value: "10.0.5.60"
+

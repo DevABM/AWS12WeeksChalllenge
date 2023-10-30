@@ -1,0 +1,160 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  Deploys the necessary IAM roles required for the GWLB Workshop.
+
+# ======================================================================================================================
+#   Parameters
+# ======================================================================================================================
+
+Parameters: 
+
+  #Desired Stack Name
+  GlobalStackName:
+    Description: 'Stackname that you would like to uniquely identify your resources.'
+    Type: String
+
+  #GWLB Lab Bucket
+  GWLBLabS3BootstrapBucket:
+    Description: 'GWLB Lab Bucket'
+    Type: String
+
+# ======================================================================================================================
+#   Resources
+# ======================================================================================================================
+
+Resources: 
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   IAM Resources - VPC Infrastructure
+# ----------------------------------------------------------------------------------------------------------------------
+
+  WebServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        !Join ["-", [Ref: "GlobalStackName", "WebFarmRole"]]
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  WebInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+        - !Ref WebServerRole
+
+  VPCServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join
+        - ""
+        - - Ref: "GlobalStackName"
+          - "-"
+          - "VPC"
+          - "-"
+          - "SSMRole"
+          - "-"
+          - Ref: AWS::Region
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+        - "arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  VPCInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+        - !Ref VPCServerRole
+
+# ----------------------------------------------------------------------------------------------------------------------
+#   IAM Resources - 3rd Party Firewall Role
+# ----------------------------------------------------------------------------------------------------------------------
+
+  VMSeriesBootStrapPolicy:
+    Type: 'AWS::IAM::Policy'
+    Properties: 
+      PolicyName: 'VMSeriesBootStrapPolicy'
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement:
+        - Effect: Allow
+          Action: 
+            - 's3:ListBucket'
+            - 's3:GetObject'
+          Resource: 
+            - !Sub arn:aws:s3:::${GWLBLabS3BootstrapBucket}/*
+            - !Sub arn:aws:s3:::${GWLBLabS3BootstrapBucket}
+        - Effect: Allow
+          Action:
+            - 'cloudwatch:*'
+          Resource:
+            - "*"
+      Roles: 
+        - !Ref VMSeriesRole
+ 
+  VMSeriesRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join
+        - ""
+        - - Ref: "GlobalStackName"
+          - "-"
+          - "VMSeries"
+          - "-"
+          - "Bootstrap-Role"
+          - "-"
+          - Ref: AWS::Region
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+        - "arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  VMSeriesInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+        - !Ref VMSeriesRole
+
+# ======================================================================================================================
+#   Outputs
+# ======================================================================================================================
+
+#You must incorporate the outputs from the Stack and then reference them again in the Main yaml template file
+Outputs:
+  VPCInstanceProfile:
+    Value: !Ref VPCInstanceProfile
+  WebInstanceProfile: 
+    Value: !Ref WebInstanceProfile
+  VMSeriesInstanceProfile: 
+    Value: !Ref VMSeriesInstanceProfile
